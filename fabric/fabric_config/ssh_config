@@ -1,0 +1,14 @@
+UserKnownHostsFile /dev/null
+StrictHostKeyChecking no
+ServerAliveInterval 120 
+
+Host bastion.fabric-testbed.net
+     User collinpoetoehena_0000217992
+     ForwardAgent yes
+     Hostname %h
+     IdentityFile ~/.ssh/fabric_bastion_key
+     IdentitiesOnly yes
+
+Host * !bastion.fabric-testbed.net
+     ProxyJump collinpoetoehena_0000217992@bastion.fabric-testbed.net:22
+    
