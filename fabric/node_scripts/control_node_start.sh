@@ -4,15 +4,11 @@ subnet=$1
 ip=$2
 
 {
+git clone https://github.com/kubernetes-sigs/kubespray.git
+cd kubespray
+git checkout release-2.27
+pip3 install -r requirements.txt
 
-yes | sudo kubeadm reset
-
-sudo kubeadm init --pod-network-cidr=${subnet} --apiserver-advertise-address=${ip}
-
-mkdir -p $HOME/.kube
-sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
-sudo chown $(id -u):$(id -g) $HOME/.kube/config
-# kubectl apply -f https://docs.projectcalico.org/manifests/calico.yaml
 kubectl get nodes
 
 }  2>&1 | tee -a start_control_plane.log
