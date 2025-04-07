@@ -1,8 +1,6 @@
 #!/bin/bash
 
 {
-sudo apt-get update && sudo apt-get install -y python3 python3-venv python3-pip
-
 git clone https://github.com/kubernetes-sigs/kubespray.git
 cd kubespray
 git checkout release-2.27
