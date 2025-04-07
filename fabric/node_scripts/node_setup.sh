@@ -3,7 +3,7 @@
 {
 
 sudo apt-get update && sudo apt-get upgrade -y
-sudo apt-get update && sudo apt-get install -y docker.io apt-transport-https curl
+sudo apt-get update && sudo apt-get install -y docker.io apt-transport-https curl python3-pip
 
 sudo rm /etc/apt/sources.list.d/docker.list /etc/apt/sources.list.d/kubernetes.list
 
