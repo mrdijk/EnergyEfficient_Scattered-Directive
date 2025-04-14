@@ -30,9 +30,17 @@ echo "Generating RabbitMQ password..."
 # Create a password for a rabbit user
 rabbit_pw=$(openssl rand -hex 16)
 
+function encode_password()
+{
+    SALT=$(od -A n -t x -N 4 /dev/urandom)
+    PASS=$SALT$(echo -n $1 | xxd -ps | tr -d '\n' | tr -d ' ')
+    PASS=$(echo -n $PASS | xxd -r -p | sha256sum | head -c 128)
+    PASS=$(echo -n $SALT$PASS | xxd -r -p | base64 | tr -d '\n')
+    echo $PASS
+}
+
 # Use the RabbitCtl to make a special hash of that password:
-hashed_pw=$($SUDO docker run --rm rabbitmq:3-management rabbitmqctl hash_password $rabbit_pw)
-actual_hash=$(echo "$hashed_pw" | cut -d $'\n' -f2)
+actual_hash=$(encode_password $rabbit_pw)
 
 echo "Replacing tokens..."
 cp ${k8s_service_files}/definitions_example.json ${rabbit_definitions_file}
