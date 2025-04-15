@@ -39,7 +39,6 @@ function encode_password()
     echo $PASS
 }
 
-# Use the RabbitCtl to make a special hash of that password:
 actual_hash=$(encode_password $rabbit_pw)
 
 echo "Replacing tokens..."
