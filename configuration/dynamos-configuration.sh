@@ -61,6 +61,7 @@ helm upgrade -i -f ${namespace_chart}/values.yaml namespaces ${namespace_chart} 
 
 echo "Preparing PVC"
 
+# TODO: Check if this is required at all
 {
     cd ${DYNAMOS_ROOT}/configuration
     ./fill-rabbit-pvc.sh
@@ -71,7 +72,9 @@ echo "Installing Prometheus..."
 
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
 helm repo update
-helm upgrade -i -f "${core_chart}/prometheus-values.yaml" prometheus prometheus-community/prometheus
+helm upgrade -i prometheus prometheus-community/kube-prometheus-stack \
+  --version 68.1.0 \
+  -f "${core_chart}/prometheus-values.yaml"
 
 echo "Installing NGINX..."
 helm install -f "${core_chart}/ingress-values.yaml" nginx oci://ghcr.io/nginxinc/charts/nginx-ingress -n ingress --version 0.18.0
