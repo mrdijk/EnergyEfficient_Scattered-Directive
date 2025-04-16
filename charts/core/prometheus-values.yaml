@@ -43,7 +43,21 @@ extraScrapeConfigs: |
       username: 'guest'
       password: 'guest'
 
-
+alertmanager:
+   nodeSelector:
+      kubernetes.io/hostname: dynamos
+metrics:
+   nodeSelector:
+      kubernetes.io/hostname: dynamos
+nodeExporter:
+   nodeSelector:
+      kubernetes.io/hostname: dynamos
+server:
+   nodeSelector:
+      kubernetes.io/hostname: dynamos
+pushgateway:
+   nodeSelector:
+      kubernetes.io/hostname: dynamos
 
 # server:
 #   podAnnotations:
