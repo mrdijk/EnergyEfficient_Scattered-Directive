@@ -5,3 +5,6 @@ tracingEndpoint: "collector.linkerd-jaeger:55678"
 branchNameTag: "main"
 dockerArtifactAccount: "dynamos1"
 
+nodeWorker1: worker-1
+nodeWorker2: worker-2
+nodeWorker3: worker-3

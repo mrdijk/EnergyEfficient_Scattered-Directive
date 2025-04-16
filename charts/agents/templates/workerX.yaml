@@ -1,0 +1,89 @@
+# apiVersion: apps/v1
+# kind: Deployment
+# metadata:
+#   name: %WORKER%
+#   namespace: %WORKER%
+# spec:
+#   replicas: 1
+#   selector:
+#     matchLabels:
+#       app: %WORKER%
+#   template:
+#     metadata:
+#       labels:
+#         app: %WORKER%
+#       annotations:
+#         "linkerd.io/inject" : enabled
+#     spec:
+#       nodeSelector:
+#         kubernetes.io/hostname: %WORKER%
+#       serviceAccountName: job-creator-%WORKER%
+#       containers:
+#       - name: %WORKER%
+#         image: {{ .Values.dockerArtifactAccount }}/agent:{{ .Values.branchNameTag }}
+#         imagePullPolicy: Always
+#         ports:
+#         - containerPort: 8080
+#         env:
+#         - name: DATA_STEWARD_NAME
+#           value: %WORKER%
+#         - name: OC_AGENT_HOST
+#           value: {{ .Values.tracingEndpoint }}
+#         # resources:
+#         #   requests:
+#         #     memory: "128Mi"
+#         #   limits:
+#         #     memory: "256Mi"
+#       - name: sidecar
+#         image: {{ .Values.dockerArtifactAccount }}/sidecar:{{ .Values.branchNameTag }}
+#         imagePullPolicy: Always
+#         env:
+#         - name: AMQ_PASSWORD
+#           valueFrom:
+#             secretKeyRef:
+#               name: rabbit
+#               key: password
+#         - name: AMQ_USER
+#           value: normal_user
+#         - name: OC_AGENT_HOST
+#           value: {{ .Values.tracingEndpoint }}
+#
+# ---
+#
+# apiVersion: v1
+# kind: Service
+# metadata:
+#   name: %WORKER%
+#   namespace: %WORKER%
+# spec:
+#   selector:
+#     app: %WORKER%
+#   ports:
+#     - name: http-%WORKER%-api
+#       protocol: TCP
+#       port: 8080
+#       targetPort: 8080
+#   type: ClusterIP
+#
+#
+# ---
+# apiVersion: networking.k8s.io/v1
+# kind: Ingress
+# metadata:
+#   name: %WORKER%-ingress
+#   namespace: %WORKER%
+#   annotations:
+#     nginx.ingress.kubernetes.io/service-upstream: "true"
+# spec:
+#   ingressClassName: nginx
+#   rules:
+#   - host: %WORKER%.%WORKER%.svc.cluster.local
+#     http:
+#       paths:
+#       - pathType: Prefix
+#         path: "/agent/v1/sqlDataRequest/%WORKER%"
+#         backend:
+#           service:
+#             name: %WORKER%
+#             port:
+#               number: 8080
