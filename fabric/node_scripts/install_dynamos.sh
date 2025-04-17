@@ -48,8 +48,27 @@ echo -e "127.0.0.1 api-gateway.api-gateway.svc.cluster.local" | sudo tee -a /etc
 
 git clone https://github.com/Javernus/DYNAMOS.git
 
-cd DYNAMOS
+./DYNAMOS/configuration/dynamos-configuration.sh
 
-./configuration/dynamos-configuration.sh
+# curl -H "Host: api-gateway.api-gateway.svc.cluster.local" http://10.145.3.3:30585/api/v1/requestApproval \
+# --header 'Content-Type: application/json' \
+# --data-raw '{
+#     "type": "sqlDataRequest",
+#     "user": {
+#         "id": "12324",
+#         "userName": "jorrit.stutterheim@cloudnation.nl"
+#     },
+#     "dataProviders": ["VU"],
+#     "data_request": {
+#         "type": "sqlDataRequest",
+#         "query" : "SELECT * FROM Personen p JOIN Aanstellingen s LIMIT 1000",
+#         "algorithm" : "average",
+#         "options" : {
+#             "graph" : false,
+#             "aggregate": false
+#         },
+#         "requestMetadata": {}
+#     }
+# }'
 
 }
