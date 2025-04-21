@@ -50,7 +50,7 @@ git clone https://github.com/Javernus/DYNAMOS.git
 
 ./DYNAMOS/configuration/dynamos-configuration.sh
 
-# curl -H "Host: api-gateway.api-gateway.svc.cluster.local" http://10.145.3.3:30585/api/v1/requestApproval \
+# curl -H "Host: api-gateway.api-gateway.svc.cluster.local" http://10.145.3.3:32389/api/v1/requestApproval \
 # --header 'Content-Type: application/json' \
 # --data-raw '{
 #     "type": "sqlDataRequest",
