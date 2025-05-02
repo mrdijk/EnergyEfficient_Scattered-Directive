@@ -1,32 +1,32 @@
 # apiVersion: apps/v1
 # kind: Deployment
 # metadata:
-#   name: %WORKER%
-#   namespace: %WORKER%
+#   name: %THIRDPARTY%
+#   namespace: %THIRDPARTY%
 # spec:
 #   replicas: 1
 #   selector:
 #     matchLabels:
-#       app: %WORKER%
+#       app: %THIRDPARTY%
 #   template:
 #     metadata:
 #       labels:
-#         app: %WORKER%
+#         app: %THIRDPARTY%
 #       annotations:
 #         "linkerd.io/inject" : enabled
 #     spec:
 #       nodeSelector:
-#         kubernetes.io/hostname: %WORKER%
-#       serviceAccountName: job-creator-%WORKER%
+#         kubernetes.io/hostname: %THIRDPARTY%
+#       serviceAccountName: job-creator-%THIRDPARTY%
 #       containers:
-#       - name: %WORKER%
+#       - name: %THIRDPARTY%
 #         image: {{ .Values.dockerArtifactAccount }}/agent:{{ .Values.branchNameTag }}
 #         imagePullPolicy: Always
 #         ports:
 #         - containerPort: 8080
 #         env:
 #         - name: DATA_STEWARD_NAME
-#           value: %WORKER%
+#           value: %THIRDPARTY%
 #         - name: OC_AGENT_HOST
 #           value: {{ .Values.tracingEndpoint }}
 #       - name: sidecar
@@ -48,13 +48,13 @@
 # apiVersion: v1
 # kind: Service
 # metadata:
-#   name: %WORKER%
-#   namespace: %WORKER%
+#   name: %THIRDPARTY%
+#   namespace: %THIRDPARTY%
 # spec:
 #   selector:
-#     app: %WORKER%
+#     app: %THIRDPARTY%
 #   ports:
-#     - name: http-%WORKER%-api
+#     - name: http-%THIRDPARTY%-api
 #       protocol: TCP
 #       port: 8080
 #       targetPort: 8080
@@ -65,20 +65,20 @@
 # apiVersion: networking.k8s.io/v1
 # kind: Ingress
 # metadata:
-#   name: %WORKER%-ingress
-#   namespace: %WORKER%
+#   name: %THIRDPARTY%-ingress
+#   namespace: %THIRDPARTY%
 #   annotations:
 #     nginx.ingress.kubernetes.io/service-upstream: "true"
 # spec:
 #   ingressClassName: nginx
 #   rules:
-#   - host: %WORKER%.%WORKER%.svc.cluster.local
+#   - host: %THIRDPARTY%.%THIRDPARTY%.svc.cluster.local
 #     http:
 #       paths:
 #       - pathType: Prefix
-#         path: "/agent/v1/sqlDataRequest/%WORKER%"
+#         path: "/agent/v1/sqlDataRequest/%THIRDPARTY%"
 #         backend:
 #           service:
-#             name: %WORKER%
+#             name: %THIRDPARTY%
 #             port:
 #               number: 8080

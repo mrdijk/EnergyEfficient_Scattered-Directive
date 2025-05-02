@@ -94,7 +94,7 @@ helm upgrade -i -f "${agents_chart}/values.yaml" agents ${agents_chart}
 sleep 1
 
 echo "Installing thirdparty layer..."
-helm upgrade -i -f "${ttp_chart}/values.yaml" surf ${ttp_chart}
+helm upgrade -i -f "${ttp_chart}/values.yaml" thirdparties ${ttp_chart}
 
 sleep 1
 

@@ -1,10 +1,5 @@
-Namespace: uva
 etcdDns: etcd-headless.core.svc.cluster.local
 etcdEndpoints: "http://etcd-0.etcd-headless.core.svc.cluster.local:2379,http://etcd-1.etcd-headless.core.svc.cluster.local:2379,http://etcd-2.etcd-headless.core.svc.cluster.local:2379"
 tracingEndpoint: "collector.linkerd-jaeger:55678"
 branchNameTag: "main"
 dockerArtifactAccount: "dynamos1"
-
-nodeWorker1: worker-1
-nodeWorker2: worker-2
-nodeWorker3: worker-3
