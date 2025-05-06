@@ -48,8 +48,6 @@ echo -e "127.0.0.1 api-gateway.api-gateway.svc.cluster.local" | sudo tee -a /etc
 
 git clone https://github.com/Javernus/DYNAMOS.git
 
-./DYNAMOS/configuration/dynamos-configuration.sh
-
 # curl -H "Host: api-gateway.api-gateway.svc.cluster.local" http://10.145.3.3:32389/api/v1/requestApproval \
 # --header 'Content-Type: application/json' \
 # --data-raw '{
