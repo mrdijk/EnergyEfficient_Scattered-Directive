@@ -1,0 +1,22 @@
+{
+  "file": "./python/vfl-data/train.csv",
+  "delimiter": ",",
+  "partitions": [
+    {
+      "name": "./configuration/datasets/outcomeData.csv",
+      "columns": ["PassengerId", "Survived"]
+    },
+    {
+      "name": "./configuration/datasets/alphaData.csv",
+      "columns": ["PassengerId", "Cabin", "Parch", "Pclass"]
+    },
+    {
+      "name": "./configuration/datasets/enigmaData.csv",
+      "columns": ["PassengerId", "Sex", "Name"]
+    },
+    {
+      "name": "./configuration/datasets/zenithData.csv",
+      "columns": ["PassengerId", "Age", "Embarked", "Fare", "SibSp"]
+    }
+  ]
+}

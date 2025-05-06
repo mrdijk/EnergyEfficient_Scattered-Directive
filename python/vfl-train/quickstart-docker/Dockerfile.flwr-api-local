@@ -1,0 +1,34 @@
+# Use the official Python image
+FROM python:3.11-slim
+
+# Set the working directory
+WORKDIR /app
+
+# Copy the current directory contents into the container at /app
+COPY ./flwr-api /app
+
+# Copy the vertical federated learning code into the container at /app
+COPY ./vertical_fl /app/vertical_fl
+
+# Delete the original flwr-start.sh
+# RUN rm flwr-start.sh
+
+# Rename the DYNAMOS flwr-start-dynamos.sh 
+# RUN mv flwr-start-dynamos.sh flwr-start.sh
+
+# Env variable to disable buffering on print output 
+ENV PYTHONUNBUFFERED=1
+
+# Update pip 
+RUN python -m pip install --upgrade pip
+
+# Install Flask and flwr
+RUN python -m pip install Flask
+# experiment with specific version of flowr 
+RUN python -m pip install flwr==1.12.0
+
+# Expose the port on which the Flask app will run
+EXPOSE 5000
+
+# Run the Flask app
+CMD ["python3", "app.py"]

@@ -1,0 +1,11 @@
+FROM flwr/clientapp:1.12.0
+
+WORKDIR /app
+COPY pyproject.toml .
+
+COPY ./data /app/data
+
+RUN sed -i 's/.*flwr\[simulation\].*//' pyproject.toml \
+    && python -m pip install -U --no-cache-dir .
+
+ENTRYPOINT ["flwr-clientapp"]

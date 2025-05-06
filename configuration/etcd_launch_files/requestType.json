@@ -1,19 +1,18 @@
 [
-    {
-        "name": "sqlDataRequest",
-        "requiredServices": [
-            "sql-query",
-            "sql-algorithm"
-        ],
-        "optionalServices": {
-            "sql-anonymize": "anonymize",
-            "sql-graph": "graph",
-            "sql-aggregate": "aggregate"
-        }
-    },
-    {
-        "name": "genericRequest",
-        "requiredServices": [],
-        "optionalServices": {}
-    }
+  {
+    "name": "vflTrainModel",
+    "requiredServices": ["vflTrainModel"]
+  },
+  {
+    "name": "vflAggregate",
+    "requiredServices": ["vflAggregate"]
+  },
+  {
+    "name": "vflRun",
+    "requiredServices": ["vflRun"]
+  },
+  {
+    "name": "vflTrain",
+    "requiredServices": ["vflTrain"]
+  }
 ]

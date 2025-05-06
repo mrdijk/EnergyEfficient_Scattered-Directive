@@ -1,68 +1,58 @@
 [
-    {
-        "name": "VU",
-        "relations": {
-            "jorrit.stutterheim@cloudnation.nl": {
-                "ID": "GUID",
-                "requestTypes": [
-                    "sqlDataRequest",
-                    "genericRequest"
-                ],
-                "dataSets": [
-                    "wageGap"
-                ],
-                "allowedArchetypes": [
-                    "computeToData",
-                    "dataThroughTtp"
-                ],
-                "allowedComputeProviders": [
-                    "SURF"
-                ]
-            }
-        },
-        "computeProviders": [
-            "SURF",
-            "otherCompany"
-        ],
-        "archetypes": [
-            "computeToData",
-            "dataThroughTtp",
-            "reproducableScience"
-        ]
+  {
+    "name": "server",
+    "relations": {
+      "jake.jongejans@student.uva.nl": {
+        "ID": "GUID",
+        "requestTypes": ["vflTrainModel", "vflAggregate", "vflRun"],
+        "dataSets": ["outcomeData"],
+        "allowedArchetypes": ["computeToData", "dataThroughTtp"],
+        "allowedComputeProviders": ["omnia", "scientia"]
+      }
     },
-    {
-        "name": "UVA",
-        "relations": {
-            "jorrit.stutterheim@cloudnation.nl": {
-                "ID": "GUID",
-                "requestTypes": [
-                    "sqlDataRequest",
-                    "genericRequest"
-                ],
-                "dataSets": [
-                    "wageGap"
-                ],
-                "allowedArchetypes": [
-                    "computeToData",
-                    "dataThroughTtp"
-                ],
-                "allowedComputeProviders": [
-                    "SURF"
-                ]
-            }
-        },
-        "computeProviders": [
-            "SURF",
-            "otherCompany"
-        ],
-        "archetypes": [
-            "computeToData",
-            "dataThroughTtp",
-            "reproducableScience"
-        ]
+    "computeProviders": ["omnia", "scientia"],
+    "archetypes": ["computeToData", "dataThroughTtp"]
+  },
+  {
+    "name": "alpha",
+    "relations": {
+      "jake.jongejans@student.uva.nl": {
+        "ID": "GUID",
+        "requestTypes": ["vflTrain"],
+        "dataSets": ["alphaData"],
+        "allowedArchetypes": ["computeToData", "dataThroughTtp"],
+        "allowedComputeProviders": ["alpha", "omnia"]
+      }
     },
-    {
-        "name": "RUG",
-        "relations": {}
-    }
+    "computeProviders": ["alpha", "omnia"],
+    "archetypes": ["computeToData", "dataThroughTtp"]
+  },
+  {
+    "name": "enigma",
+    "relations": {
+      "jake.jongejans@student.uva.nl": {
+        "ID": "GUID",
+        "requestTypes": ["vflTrain"],
+        "dataSets": ["enigmaData"],
+        "allowedArchetypes": ["computeToData", "dataThroughTtp"],
+        "allowedComputeProviders": ["enigma", "scientia"]
+      }
+    },
+    "computeProviders": ["enigma", "scientia"],
+    "archetypes": ["computeToData", "dataThroughTtp"]
+  },
+  {
+    "name": "zenith",
+    "relations": {
+      "jake.jongejans@student.uva.nl": {
+        "ID": "GUID",
+        "requestTypes": ["vflTrain"],
+        "dataSets": ["zenithData"],
+        "allowedArchetypes": ["computeToData", "dataThroughTtp"],
+        "allowedComputeProviders": ["zenith", "scientia"]
+      }
+    },
+    "computeProviders": ["zenith", "scientia"],
+    "archetypes": ["computeToData", "dataThroughTtp"]
+  }
 ]

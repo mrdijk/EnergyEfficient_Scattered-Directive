@@ -1,45 +1,32 @@
 [
-    {
-        "name": "sql-query",
-        "label": "dataProvider",
-        "allowedOutputs": [
-            "sql-aggregate",
-            "sql-algorithm",
-            "sql-anonymize"
-        ],
-        "invalidArchetypes": []
-    },
-    {
-        "name": "sql-anonymize",
-        "label": "dataProvider",
-        "allowedOutputs": [
-            "sql-aggregate",
-            "sql-algorithm"
-        ],
-        "invalidArchetypes": []
-    },
-    {
-        "name": "sql-algorithm",
-        "label": "computeProvider",
-        "allowedOutputs": [
-            "sql-graph"
-        ],
-        "invalidArchetypes": []
-    },
-    {
-        "name": "sql-graph",
-        "label": "computeProvider",
-        "allowedOutputs": [],
-        "invalidArchetypes": []
-    },
-    {
-        "name": "sql-aggregate",
-        "label": "computeProvider",
-        "allowedOutputs": [
-            "sql-algorithm"
-        ],
-        "invalidArchetypes": [
-            "computeToData"
-        ]
-    }
+  {
+    "name": "vflTrain",
+    "label": "dataProvider",
+    "allowedOutputs": ["vflCompute"],
+    "invalidArchetypes": []
+  },
+  {
+    "name": "vflTrainModel",
+    "label": "dataProvider",
+    "allowedOutputs": ["vflAggregate"],
+    "invalidArchetypes": []
+  },
+  {
+    "name": "vflRun",
+    "label": "dataProvider",
+    "allowedOutputs": [],
+    "invalidArchetypes": []
+  },
+  {
+    "name": "vflAggregate",
+    "label": "computeProvider",
+    "allowedOutputs": [],
+    "invalidArchetypes": []
+  },
+  {
+    "name": "vflCompute",
+    "label": "computeProvider",
+    "allowedOutputs": [],
+    "invalidArchetypes": []
+  }
 ]
