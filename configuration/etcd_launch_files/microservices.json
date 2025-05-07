@@ -1,30 +1,30 @@
 [
   {
-    "name": "vflTrain",
+    "name": "vfl-train",
     "label": "dataProvider",
-    "allowedOutputs": ["vflCompute"],
+    "allowedOutputs": ["vfl-compute"],
     "invalidArchetypes": []
   },
   {
-    "name": "vflTrainModel",
+    "name": "vfl-train-model",
     "label": "dataProvider",
-    "allowedOutputs": ["vflAggregate"],
+    "allowedOutputs": ["vfl-aggregate"],
     "invalidArchetypes": []
   },
   {
-    "name": "vflRun",
+    "name": "vfl-run",
     "label": "dataProvider",
     "allowedOutputs": [],
     "invalidArchetypes": []
   },
   {
-    "name": "vflAggregate",
+    "name": "vfl-aggregate",
     "label": "computeProvider",
     "allowedOutputs": [],
     "invalidArchetypes": []
   },
   {
-    "name": "vflCompute",
+    "name": "vfl-compute",
     "label": "computeProvider",
     "allowedOutputs": [],
     "invalidArchetypes": []

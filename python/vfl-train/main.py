@@ -1,27 +1,22 @@
 import pandas as pd
 from pandasql import sqldf
 import re
-import time
 import sys
 import os
 from google.protobuf.struct_pb2 import Struct, Value, ListValue
-import json
 import argparse
 from dynamos.ms_init import NewConfiguration
 from dynamos.signal_flow import signal_continuation, signal_wait
 from dynamos.logger import InitLogger
-from dynamos.tracer import InitTracer
 
 from google.protobuf.empty_pb2 import Empty
 import microserviceCommunication_pb2 as msCommTypes
 import rabbitMQ_pb2 as rabbitTypes
 import threading
-import time
-import sys
 from opentelemetry.context.context import Context
 
 
-# --- DYNAMOS Interface code At the TOP ----------------------------------------------------
+# --- DYNAMOS Interface code At the TOP ---------------------------
 if os.getenv('ENV') == 'PROD':
     import config_prod as config
 else:
@@ -41,7 +36,7 @@ wait_for_setup_condition = threading.Condition()
 
 ms_config = None
 
-# --- END DYNAMOS Interface code At the TOP ----------------------------------------------------
+# --- END DYNAMOS Interface code At the TOP ----------------------
 
 # ---- LOCAL TEST SETUP OPTIONAL!
 
@@ -62,7 +57,7 @@ def load_and_query_csv(file_path_prefix, query):
     dfs = {}
     DATA_STEWARD_NAME = os.getenv("DATA_STEWARD_NAME")
     if DATA_STEWARD_NAME == "":
-        logger.error(f"DATA_STEWARD_NAME not set.")
+        logger.error("DATA_STEWARD_NAME not set.")
 
     for table_name in table_names:
         try:
@@ -70,7 +65,7 @@ def load_and_query_csv(file_path_prefix, query):
                 table_name}_{DATA_STEWARD_NAME}.csv"
             logger.debug(f"Loading file {file_name}")
             dfs[table_name] = pd.read_csv(file_name, delimiter=';')
-            logger.debug(f"after read csv")
+            logger.debug("after read csv")
         except FileNotFoundError:
             logger.error(f"CSV file for table {table_name}_{
                          DATA_STEWARD_NAME} not found.")
@@ -82,7 +77,7 @@ def load_and_query_csv(file_path_prefix, query):
     except Exception as e:
         logger.error(f"An error occurred while executing the query: {str(e)}")
 
-    logger.debug(f"after result_df")
+    logger.debug("after result_df")
 
     return result_df
 
@@ -131,7 +126,7 @@ def process_sql_data_request(sqlDataRequest, ctx):
         return None, {}
 
 
-# ---  DYNAMOS Interface code At the Bottom -----------------------------------------------------
+# ---  DYNAMOS Interface code At the Bottom --------
 
 def request_handler(msComm: msCommTypes.MicroserviceCommunication, ctx: Context):
     global ms_config
@@ -188,7 +183,7 @@ def main():
     logger.debug(f"Exiting {config.service_name}")
     sys.exit(0)
 
-# ---  END DYNAMOS Interface code At the Bottom -------------------------------------------------
+# ---  END DYNAMOS Interface code At the Bottom -----------------
 
 
 if __name__ == "__main__":

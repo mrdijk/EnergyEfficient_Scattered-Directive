@@ -8,7 +8,7 @@ setup(
     install_requires=[
         'grpcio==1.59.3',
         'google>=3.0.0',
-        'grpcio-tools>=1.59.3',
+        'grpcio-tools==1.59.3',
         'retrying>=1.3.4',
         'grpclib>=0.4.5',
         'protobuf==4.25.3',
@@ -25,6 +25,5 @@ setup(
     author='Jorrit S.',
     author_email='',
     description='Python lib to interface microservice to DYNAMOS',
-    url='https://github.com/jorrit05/DYNAMOS'
+    url='https://github.com/Javernus/DYNAMOS'
 )
-
