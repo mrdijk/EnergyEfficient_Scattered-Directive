@@ -11,7 +11,8 @@ from vertical_fl.task import ClientModel, load_data
 checkpoint_dir = "/app/model/clients/"
 
 # note: there might be some issues with permissions in docker when creating the dir
-os.makedirs(checkpoint_dir, exist_ok=True)  # Create directory if it doesn't exist
+# Create directory if it doesn't exist
+os.makedirs(checkpoint_dir, exist_ok=True)
 
 
 class FlowerClient(NumPyClient):
@@ -39,9 +40,9 @@ class FlowerClient(NumPyClient):
         self.optimizer.step()
         return 0.0, 1, {}
 
-
     def save_checkpoint(self):
-        checkpoint_path = os.path.join(checkpoint_dir, f'checkpoint_{str(time.time())}.pth')
+        checkpoint_path = os.path.join(
+            checkpoint_dir, f'checkpoint_{str(time.time())}.pth')
 
         # Save checkpoint
         torch.save({
@@ -56,7 +57,8 @@ class FlowerClient(NumPyClient):
 def client_fn(context: Context):
     partition_id = context.node_config["partition-id"]
     num_partitions = context.node_config["num-partitions"]
-    partition, v_split_id = load_data(partition_id, num_partitions=num_partitions)
+    partition, v_split_id = load_data(
+        partition_id, num_partitions=num_partitions)
     lr = context.run_config["learning-rate"]
     return FlowerClient(v_split_id, partition, lr).to_client()
 

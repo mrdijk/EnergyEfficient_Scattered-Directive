@@ -8,7 +8,9 @@ from flwr.common import ndarrays_to_parameters, parameters_to_ndarrays
 
 
 checkpoint_dir = "/app/model/central/"
-os.makedirs(checkpoint_dir, exist_ok=True)  # Create directory if it doesn't exist
+# Create directory if it doesn't exist
+os.makedirs(checkpoint_dir, exist_ok=True)
+
 
 class ServerModel(nn.Module):
     def __init__(self, input_size):
@@ -23,7 +25,8 @@ class ServerModel(nn.Module):
 
 class Strategy(fl.server.strategy.FedAvg):
     def __init__(self, labels, *args, **kwargs) -> None:
-        super().__init__(fraction_fit=1.0, fraction_evaluate=1.0, min_fit_clients=3,  min_available_clients=3, min_evaluate_clients=3, *args, **kwargs)
+        super().__init__(fraction_fit=1.0, fraction_evaluate=1.0, min_fit_clients=3,
+                         min_available_clients=3, min_evaluate_clients=3, *args, **kwargs)
         self.model = ServerModel(12)
         self.initial_parameters = ndarrays_to_parameters(
             [val.cpu().numpy() for _, val in self.model.state_dict().items()]
@@ -77,7 +80,8 @@ class Strategy(fl.server.strategy.FedAvg):
         return parameters_aggregated, metrics_aggregated
 
     def save_checkpoint(self):
-        checkpoint_path = os.path.join(checkpoint_dir, f'checkpoint_{str(time.time())}.pth')
+        checkpoint_path = os.path.join(
+            checkpoint_dir, f'checkpoint_{str(time.time())}.pth')
 
         # Save checkpoint
         torch.save({
