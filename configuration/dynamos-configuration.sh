@@ -77,7 +77,7 @@ helm upgrade -i prometheus prometheus-community/kube-prometheus-stack \
   -f "${core_chart}/prometheus-values.yaml"
 
 echo "Installing NGINX..."
-helm install -f "${core_chart}/ingress-values.yaml" nginx oci://ghcr.io/nginxinc/charts/nginx-ingress -n ingress --version 0.18.0
+helm upgrade -f "${core_chart}/ingress-values.yaml" nginx oci://ghcr.io/nginxinc/charts/nginx-ingress -n ingress --version 0.18.0
 
 echo "Installing DYNAMOS core..."
 helm upgrade -i -f ${core_chart}/values.yaml core ${core_chart} --set hostPath=${HOME}
