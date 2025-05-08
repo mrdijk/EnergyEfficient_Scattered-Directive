@@ -91,7 +91,7 @@ def vfl_train(requestData, ctx):
 
     try:
         result = load_data(config.dataset_filepath)
-        print(result)
+        logger.debug(result)
         logger.debug("after load data")
 
         # embeddings =
@@ -123,11 +123,11 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication, ctx: Context)
     try:
         if msComm.request_type == "vflTrainRequest":
             requestData = msComm.data
-            print(requestData)
+            logger.debug(requestData)
             data = vfl_train(requestData, ctx)
-            print(data)
+            logger.debug(data)
 
-            logger.debug(f"Forwarding result, metadata: {metadata}")
+            # logger.debug(f"Forwarding result, metadata: {metadata}")
             # Ignore metadata
             ms_config.next_client.ms_comm.send_data(msComm, data, {})
             signal_continuation(stop_event, stop_microservice_condition)
@@ -156,7 +156,7 @@ def main():
         signal_wait(stop_event, stop_microservice_condition)
 
     except KeyboardInterrupt:
-        print("KeyboardInterrupt received, stopping server...")
+        logger.debug("KeyboardInterrupt received, stopping server...")
         signal_continuation(stop_event, stop_microservice_condition)
 
     ms_config.stop(2)
