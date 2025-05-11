@@ -76,7 +76,7 @@
 #     http:
 #       paths:
 #       - pathType: Prefix
-#         path: "/agent/v1/sqlDataRequest/%WORKER%"
+#         path: "/agent/v1/vflTrainRequest/%WORKER%"
 #         backend:
 #           service:
 #             name: %WORKER%

@@ -122,9 +122,11 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication, ctx: Context)
 
     try:
         if msComm.request_type == "vflTrainRequest":
+            logger.debug("Handling VFL Training request")
             requestData = msComm.data
             logger.debug(requestData)
             data = vfl_train(requestData, ctx)
+            logger.debug("Received data from VFL Training:")
             logger.debug(data)
 
             # logger.debug(f"Forwarding result, metadata: {metadata}")

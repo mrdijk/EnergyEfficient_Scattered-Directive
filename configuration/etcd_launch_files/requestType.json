@@ -1,18 +1,18 @@
 [
   {
-    "name": "vflTrainModel",
+    "name": "vflTrainModelRequest",
     "requiredServices": ["vfl-train-model"]
   },
   {
-    "name": "vflAggregate",
+    "name": "vflAggregateRequest",
     "requiredServices": ["vfl-aggregate"]
   },
   {
-    "name": "vflRun",
+    "name": "vflRunRequest",
     "requiredServices": ["vfl-run"]
   },
   {
-    "name": "vflTrain",
+    "name": "vflTrainRequest",
     "requiredServices": ["vfl-train"]
   }
 ]

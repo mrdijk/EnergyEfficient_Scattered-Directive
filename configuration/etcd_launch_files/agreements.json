@@ -4,7 +4,11 @@
     "relations": {
       "jake.jongejans@student.uva.nl": {
         "ID": "GUID",
-        "requestTypes": ["vflTrainModel", "vflAggregate", "vflRun"],
+        "requestTypes": [
+          "vflTrainModelRequest",
+          "vflAggregateRequest",
+          "vflRunRequest"
+        ],
         "dataSets": ["outcomeData"],
         "allowedArchetypes": ["computeToData", "dataThroughTtp"],
         "allowedComputeProviders": ["omnia", "scientia"]
@@ -18,7 +22,7 @@
     "relations": {
       "jake.jongejans@student.uva.nl": {
         "ID": "GUID",
-        "requestTypes": ["vflTrain"],
+        "requestTypes": ["vflTrainRequest"],
         "dataSets": ["alphaData"],
         "allowedArchetypes": ["computeToData", "dataThroughTtp"],
         "allowedComputeProviders": ["alpha", "omnia"]
@@ -32,7 +36,7 @@
     "relations": {
       "jake.jongejans@student.uva.nl": {
         "ID": "GUID",
-        "requestTypes": ["vflTrain"],
+        "requestTypes": ["vflTrainRequest"],
         "dataSets": ["enigmaData"],
         "allowedArchetypes": ["computeToData", "dataThroughTtp"],
         "allowedComputeProviders": ["enigma", "scientia"]
@@ -46,7 +50,7 @@
     "relations": {
       "jake.jongejans@student.uva.nl": {
         "ID": "GUID",
-        "requestTypes": ["vflTrain"],
+        "requestTypes": ["vflTrainRequest"],
         "dataSets": ["zenithData"],
         "allowedArchetypes": ["computeToData", "dataThroughTtp"],
         "allowedComputeProviders": ["zenith", "scientia"]
