@@ -76,7 +76,7 @@
 #     http:
 #       paths:
 #       - pathType: Prefix
-#         path: "/agent/v1/sqlDataRequest/%THIRDPARTY%"
+#         path: "/agent/v1/vflTrainRequest/%THIRDPARTY%"
 #         backend:
 #           service:
 #             name: %THIRDPARTY%

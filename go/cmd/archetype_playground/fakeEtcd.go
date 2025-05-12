@@ -28,9 +28,9 @@ func fetchFromETCD(key string) Archetype {
 
 func fetchRequestType(key string) RequestType {
 	switch key {
-	case "/requestType/sqlDataRequest":
+	case "/requestType/vflTrainRequest":
 		return RequestType{
-			Type:             "sqlDataRequest",
+			Type:             "vflTrainRequest",
 			RequiredServices: []string{"query_service", "algorithm_service"},
 			OptionalServices: []string{"aggregate_service", "anonymize_service", "graph_service"},
 		}
