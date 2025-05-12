@@ -87,14 +87,14 @@ func main() {
 	methodsOk := handlers.AllowedMethods([]string{"GET", "HEAD", "POST", "PUT", "OPTIONS"})
 
 	agentMux := http.NewServeMux()
-	agentMux.Handle(fmt.Sprintf("/agent/v1/sqlDataRequest/%s", strings.ToLower(serviceName)), &ochttp.Handler{Handler: sqlDataRequestHandler()})
+	agentMux.Handle(fmt.Sprintf("/agent/v1/vflTrainRequest/%s", strings.ToLower(serviceName)), &ochttp.Handler{Handler: sqlDataRequestHandler()})
 
 	// apiMux.Handle("/archetypes/", &ochttp.Handler{Handler: archetypesHandler(etcdClient, "/archetypes")})
 
 	wrappedAgentMux := authMiddleware(agentMux)
 
 	mux := http.NewServeMux()
-	mux.Handle(fmt.Sprintf("/agent/v1/sqlDataRequest/%s", strings.ToLower(serviceName)), wrappedAgentMux)
+	mux.Handle(fmt.Sprintf("/agent/v1/vflTrainRequest/%s", strings.ToLower(serviceName)), wrappedAgentMux)
 
 	logger.Sugar().Infow("Starting http server on: ", "port", port)
 	go func() {

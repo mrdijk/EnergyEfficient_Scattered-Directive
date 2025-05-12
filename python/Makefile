@@ -27,7 +27,7 @@ $(targets): proto
 	@trap 'rm -f ./$@/Dockerfile; rm -rf ./$@/*.whl; rm -rf ./$@/datasets; rm -rf ./$@/protofiles' EXIT;  \
 	WHEEL_NAME=$$(ls ./$@/*.whl); \
 	BASE=$$(basename $$WHEEL_NAME); \
-	docker build --build-arg NAME=$@ -t $(dockerhub_account)/$@:$(branch_name) --build-arg WHEEL_NAME=$$BASE -t $(dockerhub_account)/$@:latest ./$@/
+	docker build --platform linux/amd64 --build-arg NAME=$@ -t $(dockerhub_account)/$@:$(branch_name) --build-arg WHEEL_NAME=$$BASE -t $(dockerhub_account)/$@:latest ./$@/
 
 	# Push to Docker
 	docker push $(dockerhub_account)/$@:$(branch_name)

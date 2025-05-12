@@ -14,7 +14,7 @@ $(dynamos): prepare proto
 	cp Dockerfile go.mod go.sum ./cmd/$@
 	cp -r pkg ./cmd/$@
 	(trap 'rm -f ./cmd/$@/Dockerfile; rm -f ./cmd/$@/go.*; rm -rf ./cmd/$@/pkg' EXIT; \
-	docker build --build-arg NAME='$@' -t $(dockerhub_account)/$@:$(branch_name) -t $(dockerhub_account)/$@:latest ./cmd/$@/)
+	docker build --platform linux/amd64 --build-arg NAME='$@' -t $(dockerhub_account)/$@:$(branch_name) -t $(dockerhub_account)/$@:latest ./cmd/$@/)
 	docker push $(dockerhub_account)/$@:$(branch_name)
 	docker push $(dockerhub_account)/$@:latest
 
@@ -23,7 +23,7 @@ $(sql_microservices): prepare proto
 	cp Dockerfile go.mod go.sum ./cmd/$@
 	cp -r pkg ./cmd/$@
 	(trap 'rm -f ./cmd/$@/Dockerfile; rm -f ./cmd/$@/go.*; rm -rf ./cmd/$@/pkg' EXIT; \
-	docker build --build-arg NAME='$@' -t $(dockerhub_account)/$@:$(branch_name) -t $(dockerhub_account)/$@:latest ./cmd/$@/)
+	docker build --platform linux/amd64 --build-arg NAME='$@' -t $(dockerhub_account)/$@:$(branch_name) -t $(dockerhub_account)/$@:latest ./cmd/$@/)
 	docker push $(dockerhub_account)/$@:$(branch_name)
 	docker push $(dockerhub_account)/$@:latest
 
