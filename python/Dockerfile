@@ -15,7 +15,7 @@ COPY requirements.txt .
 COPY ./*.py /app/$NAME
 COPY ./protofiles/*.py /app/protofiles
 
-COPY ./*.csv /app/datasets
+COPY ./datasets/ /app/datasets
 COPY $WHEEL_NAME /tmp/
 
 RUN pip install /tmp/$WHEEL_NAME

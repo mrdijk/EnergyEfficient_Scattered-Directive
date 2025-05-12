@@ -2,22 +2,25 @@
   "file": "./python/vfl-data/train.csv",
   "delimiter": ",",
   "sensitive": ["PassengerId", "Survived", "Name"],
-  "outputDirectory": "./configuration/datasets/",
   "partitions": [
     {
       "name": "outcomeData",
+      "outputDirectory": "./python/vfl-train-model/datasets/",
       "columns": ["PassengerId", "Survived"]
     },
     {
       "name": "alphaData",
+      "outputDirectory": "./python/vfl-train/datasets/",
       "columns": ["PassengerId", "Cabin", "Parch", "Pclass"]
     },
     {
       "name": "enigmaData",
+      "outputDirectory": "./python/vfl-train/datasets/",
       "columns": ["PassengerId", "Sex", "Name"]
     },
     {
       "name": "zenithData",
+      "outputDirectory": "./python/vfl-train/datasets/",
       "columns": ["PassengerId", "Age", "Embarked", "Fare", "SibSp"]
     }
   ]

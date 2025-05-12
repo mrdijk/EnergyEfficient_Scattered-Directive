@@ -1,6 +1,5 @@
 pandas>=2.2.2
-torch>=2.7.0
+torch>=2.7.0+cpu
 dynamos>=0.1
-pandasql>=0.7.3
 opentelemetry-api>=1.19.0
 opentelemetry-instrumentation>=0.40b0

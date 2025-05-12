@@ -46,15 +46,18 @@ ms_config = None
 
 
 def load_data(file_path):
-    # DATA_STEWARD_NAME = os.getenv("DATA_STEWARD_NAME")
-    # if DATA_STEWARD_NAME == "":
-    #     logger.error("DATA_STEWARD_NAME not set.")
+    DATA_STEWARD_NAME = os.getenv("DATA_STEWARD_NAME")
+    file_name = f"{file_path}/{DATA_STEWARD_NAME}Data.csv"
+
+    if DATA_STEWARD_NAME == "":
+        logger.error("DATA_STEWARD_NAME not set.")
+        file_name = f"{file_path}Data.csv"
 
     try:
-        data = pd.read_csv(file_path, delimiter=',')
+        data = pd.read_csv(file_name, delimiter=',')
         logger.debug("after read csv")
     except FileNotFoundError:
-        logger.error(f"CSV file for table {file_path} not found.")
+        logger.error(f"CSV file for table {file_name} not found.")
         return None
 
     return data
