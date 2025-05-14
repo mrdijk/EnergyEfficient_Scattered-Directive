@@ -30,39 +30,39 @@ func handleIncomingMessages(ctx context.Context, grpcMsg *pb.SideCarMessage) err
 	case "microserviceCommunication":
 
 		handleMicroserviceCommunication(ctx, grpcMsg)
-	case "sqlDataRequest":
-		// handleSqlRequestDataProvider
-		// Receive sqlDataRequest through RabbitMQ, means we received the request from the computeProvider
+	case "Request":
+		// handleRequestDataProvider
+		// Receive Request through RabbitMQ, means we received the request from the computeProvider
 		// Implicitly this means I am only a dataProvider
-		logger.Debug("Received sqlDataRequest from Rabbit (third party)")
+		logger.Debug("Received Request from Rabbit (third party)")
 
-		sqlDataRequest := &pb.SqlDataRequest{}
+		request := &pb.Request{}
 
-		if err := grpcMsg.Body.UnmarshalTo(sqlDataRequest); err != nil {
-			logger.Sugar().Errorf("Failed to unmarshal sqlResult message: %v", err)
+		if err := grpcMsg.Body.UnmarshalTo(request); err != nil {
+			logger.Sugar().Errorf("Failed to unmarshal Result message: %v", err)
 		}
 
 		ttpMutex.Lock()
-		thirdPartyMap[sqlDataRequest.RequestMetadata.CorrelationId] = sqlDataRequest.RequestMetadata.ReturnAddress
+		thirdPartyMap[request.RequestMetadata.CorrelationId] = request.RequestMetadata.ReturnAddress
 		ttpMutex.Unlock()
 
 		msComm := &pb.MicroserviceCommunication{}
 		msComm.RequestMetadata = &pb.RequestMetadata{}
 
 		msComm.Type = "microserviceCommunication"
-		msComm.RequestType = sqlDataRequest.Type
+		msComm.RequestType = request.Type
 		// Set own routing key as return address to ensure the response comes back to me and then returned to where it needs
 		msComm.RequestMetadata.ReturnAddress = agentConfig.RoutingKey
-		msComm.RequestMetadata.CorrelationId = sqlDataRequest.RequestMetadata.CorrelationId
+		msComm.RequestMetadata.CorrelationId = request.RequestMetadata.CorrelationId
 
-		any, err := anypb.New(sqlDataRequest)
+		any, err := anypb.New(request)
 		if err != nil {
 			logger.Sugar().Error(err)
 			return err
 		}
 
 		msComm.OriginalRequest = any
-		compositionRequest, err := getCompositionRequest(sqlDataRequest.User.UserName, sqlDataRequest.RequestMetadata.JobId)
+		compositionRequest, err := getCompositionRequest(request.User.UserName, request.RequestMetadata.JobId)
 		if err != nil {
 
 			logger.Sugar().Errorf("Error getting matching composition request: %v", err)
@@ -71,7 +71,9 @@ func handleIncomingMessages(ctx context.Context, grpcMsg *pb.SideCarMessage) err
 		msComm.RequestMetadata.DestinationQueue = compositionRequest.LocalJobName
 		key := fmt.Sprintf("/agents/jobs/%s/queueInfo/%s", serviceName, compositionRequest.LocalJobName)
 		value := compositionRequest.LocalJobName
-		generateChainAndDeploy(ctx, compositionRequest, compositionRequest.LocalJobName, sqlDataRequest.Options)
+
+		// No options
+		generateChainAndDeploy(ctx, compositionRequest, compositionRequest.LocalJobName, request.Options)
 		c.SendMicroserviceComm(ctx, msComm)
 
 		logger.Sugar().Warnf("key: %v", key)

@@ -19,17 +19,17 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
-// Getting the SQL request through HTTP. This means the request is coming from the user. So it can be either a computeToData or DataThroughTtp request.
+// Getting the request through HTTP. This means the request is coming from the user. So it can be either a computeToData or DataThroughTtp request.
 // Based on the role we have, it will be handled as one or the other.
-func sqlDataRequestHandler() http.HandlerFunc {
+func requestHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		logger.Debug("Entering sqlDataRequestHandler")
+		logger.Debug("Entering requestHandler")
 		// Start a new span with the context that has a timeout
 
 		ctxWithTimeout, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 		defer cancel()
 
-		ctx, span := trace.StartSpan(ctxWithTimeout, serviceName+"/func: sqlDataRequestHandler")
+		ctx, span := trace.StartSpan(ctxWithTimeout, serviceName+"/func: requestHandler")
 		defer span.End()
 
 		body, err := api.GetRequestBody(w, r, serviceName)
@@ -38,24 +38,24 @@ func sqlDataRequestHandler() http.HandlerFunc {
 			return
 		}
 
-		sqlDataRequest := &pb.SqlDataRequest{}
-		sqlDataRequest.RequestMetadata = &pb.RequestMetadata{}
+		request := &pb.Request{}
+		request.RequestMetadata = &pb.RequestMetadata{}
 
-		err = protojson.Unmarshal(body, sqlDataRequest)
+		err = protojson.Unmarshal(body, request)
 		if err != nil {
-			logger.Sugar().Warnf("Error unmarshalling sqlDataRequest: %v", err)
+			logger.Sugar().Warnf("Error unmarshalling dataRequest: %v", err)
 			http.Error(w, "Bad request", http.StatusBadRequest)
 			return
 		}
 
-		if sqlDataRequest.RequestMetadata.JobId == "" {
+		if request.RequestMetadata.JobId == "" {
 			http.Error(w, "Job ID not passed", http.StatusInternalServerError)
 			return
 		}
 
 		// Get the matching composition request and determine our role
 		// /agents/jobs/UVA/jorrit-3141334
-		compositionRequest, err := getCompositionRequest(sqlDataRequest.User.UserName, sqlDataRequest.RequestMetadata.JobId)
+		compositionRequest, err := getCompositionRequest(request.User.UserName, request.RequestMetadata.JobId)
 		if err != nil {
 			http.Error(w, "No job found for this user", http.StatusBadRequest)
 			return
@@ -66,7 +66,7 @@ func sqlDataRequestHandler() http.HandlerFunc {
 
 		// Switch on the role we have in this data request
 		if strings.EqualFold(compositionRequest.Role, "computeProvider") {
-			ctx, err = handleSqlComputeProvider(ctx, compositionRequest.LocalJobName, compositionRequest, sqlDataRequest, correlationId)
+			ctx, err = handleComputeProvider(ctx, compositionRequest.LocalJobName, compositionRequest, request, correlationId)
 			if err != nil {
 				logger.Sugar().Errorf("Error in computeProvider role: %v", err)
 				http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -74,7 +74,7 @@ func sqlDataRequestHandler() http.HandlerFunc {
 			}
 
 		} else if strings.EqualFold(compositionRequest.Role, "all") {
-			ctx, err = handleSqlAll(ctx, compositionRequest.LocalJobName, compositionRequest, sqlDataRequest, correlationId)
+			ctx, err = handleAll(ctx, compositionRequest.LocalJobName, compositionRequest, request, correlationId)
 			if err != nil {
 				logger.Sugar().Errorf("Error in all role: %v", err)
 				http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -108,14 +108,14 @@ func sqlDataRequestHandler() http.HandlerFunc {
 				logger.Sugar().Warnf("error marshalling jsonBytes message, %v", err)
 			}
 
-			span.AddAttributes(trace.Int64Attribute("sqlDataRequestHandler.proto.messageSize", int64(len(msgBytes))))
-			span.AddAttributes(trace.Int64Attribute("sqlDataRequestHandler.json.messageSize", int64(len(jsonBytes))))
-			span.AddAttributes(trace.Int64Attribute("sqlDataRequestHandler.String.messageSize", int64(len(msComm.Result))))
-			logger.Sugar().Debugf("Result: %s", msComm.Result)
+			span.AddAttributes(trace.Int64Attribute("requestHandler.proto.messageSize", int64(len(msgBytes))))
+			span.AddAttributes(trace.Int64Attribute("requestHandler.json.messageSize", int64(len(jsonBytes))))
+			span.AddAttributes(trace.Int64Attribute("requestHandler.String.messageSize", int64(len(msComm.Result))))
+			logger.Sugar().Debugf("msComm jsonBytes: %s", jsonBytes)
 
 			//Handle response information
 			w.WriteHeader(http.StatusOK)
-			w.Write(msComm.Result)
+			w.Write(jsonBytes)
 			return
 
 		case <-ctx.Done():
@@ -125,15 +125,15 @@ func sqlDataRequestHandler() http.HandlerFunc {
 	}
 }
 
-// handleSqlAll means we do all work for this request, not third part involved (computeToData archeType)
-func handleSqlAll(ctx context.Context, jobName string, compositionRequest *pb.CompositionRequest, sqlDataRequest *pb.SqlDataRequest, correlationId string) (context.Context, error) {
+// handleAll means we do all work for this request, not third part involved (computeToData archeType)
+func handleAll(ctx context.Context, jobName string, compositionRequest *pb.CompositionRequest, request *pb.Request, correlationId string) (context.Context, error) {
 	// Create msChain and deploy job.
 
-	ctx, span := trace.StartSpan(ctx, serviceName+"/func: handleSqlAll")
+	ctx, span := trace.StartSpan(ctx, serviceName+"/func: handleAll")
 	defer span.End()
 
 	var err error
-	ctx, _, err = generateChainAndDeploy(ctx, compositionRequest, jobName, sqlDataRequest.Options)
+	ctx, _, err = generateChainAndDeploy(ctx, compositionRequest, jobName, request.Options)
 	if err != nil {
 		logger.Sugar().Errorf("error deploying job: %v", err)
 		return ctx, err
@@ -146,7 +146,7 @@ func handleSqlAll(ctx context.Context, jobName string, compositionRequest *pb.Co
 	msComm.RequestMetadata.ReturnAddress = agentConfig.RoutingKey
 	msComm.RequestType = compositionRequest.RequestType
 
-	any, err := anypb.New(sqlDataRequest)
+	any, err := anypb.New(request)
 	if err != nil {
 		logger.Sugar().Error(err)
 		return ctx, err
@@ -167,10 +167,10 @@ func handleSqlAll(ctx context.Context, jobName string, compositionRequest *pb.Co
 	return ctx, nil
 }
 
-// handleSqlComputeProvider means we have a computeProvider role only (dataThroughTtp archeType)
+// handleComputeProvider means we have a computeProvider role only (dataThroughTtp archeType)
 // We are responsible for forwarding the request to all dataProviders.
-func handleSqlComputeProvider(ctx context.Context, jobName string, compositionRequest *pb.CompositionRequest, sqlDataRequest *pb.SqlDataRequest, correlationId string) (context.Context, error) {
-	ctx, span := trace.StartSpan(ctx, serviceName+"/func: handleSqlComputeProvider")
+func handleComputeProvider(ctx context.Context, jobName string, compositionRequest *pb.CompositionRequest, request *pb.Request, correlationId string) (context.Context, error) {
+	ctx, span := trace.StartSpan(ctx, serviceName+"/func: handleComputeProvider")
 	defer span.End()
 
 	// pack and send request to all data providers, add own routing key as return address
@@ -187,15 +187,15 @@ func handleSqlComputeProvider(ctx context.Context, jobName string, compositionRe
 			return ctx, fmt.Errorf("error getting dataProvider dns")
 		}
 
-		sqlDataRequest.RequestMetadata.DestinationQueue = agentData.RoutingKey
+		request.RequestMetadata.DestinationQueue = agentData.RoutingKey
 
 		// This is a bit confusing, but it tells the other agent to go back here.
 		// The other agent, will reset the address to get the message from the job.
-		sqlDataRequest.RequestMetadata.ReturnAddress = agentConfig.RoutingKey
+		request.RequestMetadata.ReturnAddress = agentConfig.RoutingKey
 
-		sqlDataRequest.RequestMetadata.CorrelationId = correlationId
-		sqlDataRequest.RequestMetadata.JobName = compositionRequest.JobName
-		logger.Sugar().Debugf("Sending sqlDataRequest to: %s", sqlDataRequest.RequestMetadata.DestinationQueue)
+		request.RequestMetadata.CorrelationId = correlationId
+		request.RequestMetadata.JobName = compositionRequest.JobName
+		logger.Sugar().Debugf("Sending request to: %s", request.RequestMetadata.DestinationQueue)
 
 		key := fmt.Sprintf("/agents/jobs/%s/queueInfo/%s", serviceName, jobName)
 		err = etcd.PutEtcdWithGrant(ctx, etcdClient, key, jobName, queueDeleteAfter)
@@ -203,23 +203,23 @@ func handleSqlComputeProvider(ctx context.Context, jobName string, compositionRe
 			logger.Sugar().Errorf("Error PutEtcdWithGrant: %v", err)
 		}
 
-		_, err = c.SendSqlDataRequest(ctx, sqlDataRequest)
+		_, err = c.SendRequest(ctx, request)
 		if err != nil {
-			logger.Sugar().Errorf("Error c.SendSqlDataRequest: %v", err)
+			logger.Sugar().Errorf("Error c.Sendrequest: %v", err)
 		}
 	}
 
-	// TODO: Parse SQL request for extra compute services
+	// TODO: Parse request for extra compute services
 	var err error
-	ctx, createdJob, err := generateChainAndDeploy(ctx, compositionRequest, jobName, sqlDataRequest.Options)
+	ctx, createdJob, err := generateChainAndDeploy(ctx, compositionRequest, jobName, request.Options)
 	if err != nil {
 		logger.Sugar().Errorf("error deploying job: %v", err)
 	}
 	logger.Sugar().Debugf("Created job: %s", createdJob.Name)
 	waitingJobMutex.Lock()
-	waitingJobMap[sqlDataRequest.RequestMetadata.CorrelationId] = &waitingJob{job: createdJob, nrOfDataStewards: len(compositionRequest.DataProviders)}
+	waitingJobMap[request.RequestMetadata.CorrelationId] = &waitingJob{job: createdJob, nrOfDataStewards: len(compositionRequest.DataProviders)}
 	waitingJobMutex.Unlock()
-	logger.Sugar().Debugf("Created job nr of stewards: %d", waitingJobMap[sqlDataRequest.RequestMetadata.CorrelationId].nrOfDataStewards)
+	logger.Sugar().Debugf("Created job nr of stewards: %d", waitingJobMap[request.RequestMetadata.CorrelationId].nrOfDataStewards)
 
 	return ctx, nil
 }

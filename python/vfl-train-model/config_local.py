@@ -1,5 +1,4 @@
 grpc_addr = "localhost:"
 service_name = "test"
-dataset_filepath = "/Users/jorrit/Documents/uva/DYNAMOS/python/query/Aanstellingen_UVA.csv"
+dataset_filepath = "~/Documents/University/Thesis/DYNAMOS/configuration/datasets/outcomeData.csv"
 tracing_host = "http://localhost:32003"
-

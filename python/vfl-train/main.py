@@ -1,16 +1,25 @@
 import pandas as pd
+import numpy as np
 import sys
 import os
+import io
+import json
+import torch
+import torch.nn as nn
+from collections import OrderedDict
+from sklearn.preprocessing import StandardScaler
 from google.protobuf.struct_pb2 import Struct
 from dynamos.ms_init import NewConfiguration
 from dynamos.signal_flow import signal_continuation, signal_wait
 from dynamos.logger import InitLogger
+import rabbitMQ_pb2 as rabbitTypes
 
 from google.protobuf.empty_pb2 import Empty
 import microserviceCommunication_pb2 as msCommTypes
 import threading
 from opentelemetry.context.context import Context
 
+np.set_printoptions(threshold=sys.maxsize)
 
 # --- DYNAMOS Interface code At the TOP ---------------------------
 if os.getenv('ENV') == 'PROD':
@@ -46,7 +55,8 @@ ms_config = None
 
 
 def load_data(file_path):
-    DATA_STEWARD_NAME = os.getenv("DATA_STEWARD_NAME")
+    DATA_STEWARD_NAME = os.getenv("DATA_STEWARD_NAME").lower()
+
     file_name = f"{file_path}/{DATA_STEWARD_NAME}Data.csv"
 
     if DATA_STEWARD_NAME == "":
@@ -63,55 +73,88 @@ def load_data(file_path):
     return data
 
 
-# def dataframe_to_protobuf(df):
-#     # Convert the DataFrame to a dictionary of lists (one for each column)
-#     data_dict = df.to_dict(orient='list')
-#
-#     # Convert the dictionary to a Struct
-#     data_struct = Struct()
-#
-#     # Iterate over the dictionary and add each value to the Struct
-#     for key, values in data_dict.items():
-#         # Pack each item of the list into a Value object
-#         value_list = [Value(string_value=str(item)) for item in values]
-#         # Pack these Value objects into a ListValue
-#         list_value = ListValue(values=value_list)
-#         # Add the ListValue to the Struct
-#         data_struct.fields[key].CopyFrom(Value(list_value=list_value))
-#
-#     # Create the metadata
-#     # Infer the data types of each column
-#     data_types = df.dtypes.apply(lambda x: x.name).to_dict()
-#     # Convert the data types to string values
-#     metadata = {k: str(v) for k, v in data_types.items()}
-#
-#     return data_struct, metadata
+class ClientModel(nn.Module):
+    def __init__(self, input_size):
+        super().__init__()
+        self.fc = nn.Linear(input_size, 4)
+
+    def forward(self, x):
+        return self.fc(x)
 
 
-def vfl_train(requestData, ctx):
-    global config
-    logger.debug("Start vfl_train")
+def serialise_array(array):
+    return json.dumps([
+        str(array.dtype),
+        array.tobytes().decode("latin1"),
+        array.shape])
+
+
+def deserialise_array(string, hook=None):
+    encoded_data = json.loads(string, object_pairs_hook=hook)
+    dataType = np.dtype(encoded_data[0])
+    dataArray = np.frombuffer(encoded_data[1].encode("latin1"), dataType)
+
+    if len(encoded_data) > 2:
+        return dataArray.reshape(encoded_data[2])
+
+    return dataArray
+
+
+def train_model(data, model):
+    embedding = model(data)
+    return embedding.detach().numpy()
+
+
+def vfl_evaluate(data, model, optimiser, gradients):
+    logger.debug("Start vfl_evaluate")
 
     try:
-        result = load_data(config.dataset_filepath)
-        logger.debug(result)
-        logger.debug("after load data")
-
-        # embeddings =
-        embeddings = ["this is not an embedding", "nor is this",
-                      "but it gets the ~point~ data across."]
-
-        # data, metadata = dataframe_to_protobuf(result)
-        data = Struct()
-        data.update({"embeddings": embeddings})
-
-        return data
-    except FileNotFoundError:
-        logger.error(f"File not found at path {config.dataset_filepath}")
-        return None
+        model.zero_grad()
+        embedding = model(data)
+        embedding.backward(torch.from_numpy(gradients))
+        optimiser.step()
     except Exception as e:
-        logger.error(f"An error occurred: {str(e)}")
-        return None
+        logger.error(f"Error occurred: {e}")
+
+
+# Note: Gradients sent by server are for this client only to preserve privacy
+def vfl_train(learning_rate, model_state, gradients):
+    global config
+
+    try:
+        data = load_data(config.dataset_filepath)
+    except Exception as e:
+        logger.error(f"Error occurred: {e}")
+
+        # If data does not exist, shut down service
+        logger.error("Shutting down the service")
+        signal_continuation(stop_event, stop_microservice_condition)
+        return None, None
+
+    data = torch.tensor(StandardScaler().fit_transform(data)).float()
+    model = ClientModel(data.shape[1])
+
+    if model_state is not None:
+        print(model_state)
+        model.load_state_dict(torch.load(
+            io.BytesIO(model_state.encode("latin1"))))
+
+    optimiser = torch.optim.SGD(model.parameters(), lr=learning_rate)
+
+    if gradients is not None:
+        vfl_evaluate(data, model, optimiser, gradients)
+
+    embeddings = train_model(data, model)
+    model_state = model.state_dict()
+
+    buffer = io.BytesIO()
+    torch.save(model_state, buffer)
+
+    data = Struct()
+    data.update({"embeddings": serialise_array(embeddings),
+                 "model_state": buffer.getvalue().decode("latin1")})
+
+    return data
 
 
 # ---  DYNAMOS Interface code At the Bottom --------
@@ -119,26 +162,52 @@ def vfl_train(requestData, ctx):
 def request_handler(msComm: msCommTypes.MicroserviceCommunication, ctx: Context):
     global ms_config
     logger.info(f"Received original request type: {msComm.request_type}")
+    logger.debug(msComm)
 
     # Ensure all connections have finished setting up before processing data
     signal_wait(wait_for_setup_event, wait_for_setup_condition)
 
     try:
         if msComm.request_type == "vflTrainRequest":
+            request = rabbitTypes.Request()
+            msComm.original_request.Unpack(request)
+
+            try:
+                learning_rate = request.data["learning_rate"].number_value
+            except Exception:
+                learning_rate = 0.05
+
+            try:
+                gradients = request.data["gradients"].string_value
+                gradients = deserialise_array(gradients)
+            except Exception as e:
+                print(e, request.data["gradients"])
+                gradients = None
+
+            try:
+                model_state = request.data["model_state"].string_value
+                print(model_state)
+                model_state = json.loads(
+                    model_state, object_pairs_hook=OrderedDict)
+                print(model_state)
+            except Exception as e:
+                print(e, request.data["model_state"])
+                model_state = None
+
             logger.debug("Handling VFL Training request")
-            requestData = msComm.data
-            logger.debug(requestData)
-            data = vfl_train(requestData, ctx)
+            data = vfl_train(
+                learning_rate, model_state, gradients)
             logger.debug("Received data from VFL Training:")
             logger.debug(data)
 
-            # logger.debug(f"Forwarding result, metadata: {metadata}")
             # Ignore metadata
             ms_config.next_client.ms_comm.send_data(msComm, data, {})
             signal_continuation(stop_event, stop_microservice_condition)
 
         else:
             logger.error(f"An unknown request_type: {msComm.request_type}")
+            # If not recognised, this service should ceize to exist.
+            signal_continuation(stop_event, stop_microservice_condition)
 
         return Empty()
     except Exception as e:

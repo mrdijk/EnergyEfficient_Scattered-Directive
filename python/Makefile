@@ -1,5 +1,5 @@
 SHELL := /bin/bash
-targets := sql-query vfl-train-model vfl-train vfl-run
+targets := sql-query vfl-train-model vfl-train
 datasets := "../configuration/datasets/"
 branch_name := $(shell git rev-parse --abbrev-ref HEAD)
 dockerhub_account := javernus
@@ -24,7 +24,7 @@ $(targets): proto
 	cp -r ./dynamos-python-lib/protofiles ./$@
 
 	# Build Docker container
-	@trap 'rm -f ./$@/Dockerfile; rm -rf ./$@/*.whl; rm -rf ./$@/datasets; rm -rf ./$@/protofiles' EXIT;  \
+	@trap 'rm -f ./$@/Dockerfile; rm -rf ./$@/*.whl; rm -rf ./$@/protofiles' EXIT;  \
 	WHEEL_NAME=$$(ls ./$@/*.whl); \
 	BASE=$$(basename $$WHEEL_NAME); \
 	docker build --platform linux/amd64 --build-arg NAME=$@ -t $(dockerhub_account)/$@:$(branch_name) --build-arg WHEEL_NAME=$$BASE -t $(dockerhub_account)/$@:latest ./$@/

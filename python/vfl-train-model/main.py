@@ -1,27 +1,23 @@
 import pandas as pd
-from pandasql import sqldf
-import re
-import time
+import numpy as np
 import sys
 import os
-from google.protobuf.struct_pb2 import Struct, Value, ListValue
-import json
-import argparse
+import torch
+import torch.nn as nn
+from sklearn.preprocessing import StandardScaler
+from google.protobuf.struct_pb2 import Struct
 from dynamos.ms_init import NewConfiguration
 from dynamos.signal_flow import signal_continuation, signal_wait
 from dynamos.logger import InitLogger
-from dynamos.tracer import InitTracer
 
 from google.protobuf.empty_pb2 import Empty
 import microserviceCommunication_pb2 as msCommTypes
-import rabbitMQ_pb2 as rabbitTypes
 import threading
-import time
-import sys
 from opentelemetry.context.context import Context
 
+np.set_printoptions(threshold=sys.maxsize)
 
-# --- DYNAMOS Interface code At the TOP ----------------------------------------------------
+# --- DYNAMOS Interface code At the TOP ---------------------------
 if os.getenv('ENV') == 'PROD':
     import config_prod as config
 else:
@@ -41,97 +37,112 @@ wait_for_setup_condition = threading.Condition()
 
 ms_config = None
 
-# --- END DYNAMOS Interface code At the TOP ----------------------------------------------------
+# --- END DYNAMOS Interface code At the TOP ----------------------
 
 # ---- LOCAL TEST SETUP OPTIONAL!
 
 # Go into local test code with flag '-t'
-parser = argparse.ArgumentParser()
-parser.add_argument("-t", "--test", action='store_true')
-args = parser.parse_args()
-test = args.test
+# parser = argparse.ArgumentParser()
+# parser.add_argument("-t", "--test", action='store_true')
+# args = parser.parse_args()
+# test = args.test
 
 # --------------------------------
 
 
-def load_and_query_csv(file_path_prefix, query):
-    # Extract table names from the query
-    table_names = re.findall(r'FROM (\w+)', query) + \
-        re.findall(r'JOIN (\w+)', query)
-    # Create a dictionary to hold DataFrames, keyed by table name
-    dfs = {}
-    DATA_STEWARD_NAME = os.getenv("DATA_STEWARD_NAME")
+def load_data(file_path):
+    DATA_STEWARD_NAME = os.getenv("DATA_STEWARD_NAME").lower()
+
+    file_name = f"{file_path}/outcomeData.csv"
+
     if DATA_STEWARD_NAME == "":
-        logger.error(f"DATA_STEWARD_NAME not set.")
-
-    for table_name in table_names:
-        try:
-            file_name = f"{file_path_prefix}{
-                table_name}_{DATA_STEWARD_NAME}.csv"
-            logger.debug(f"Loading file {file_name}")
-            dfs[table_name] = pd.read_csv(file_name, delimiter=';')
-            logger.debug(f"after read csv")
-        except FileNotFoundError:
-            logger.error(f"CSV file for table {table_name}_{
-                         DATA_STEWARD_NAME} not found.")
-            return None
+        logger.error("DATA_STEWARD_NAME not set.")
+        file_name = f"{file_path}Data.csv"
 
     try:
-        # Use pandasql's sqldf function to execute the SQL query
-        result_df = sqldf(query, dfs)
-    except Exception as e:
-        logger.error(f"An error occurred while executing the query: {str(e)}")
+        data = pd.read_csv(file_name, delimiter=',')
+        logger.debug("after read csv")
+    except FileNotFoundError:
+        logger.error(f"CSV file for table {file_name} not found.")
+        return None
 
-    logger.debug(f"after result_df")
-
-    return result_df
-
-
-def dataframe_to_protobuf(df):
-    # Convert the DataFrame to a dictionary of lists (one for each column)
-    data_dict = df.to_dict(orient='list')
-
-    # Convert the dictionary to a Struct
-    data_struct = Struct()
-
-    # Iterate over the dictionary and add each value to the Struct
-    for key, values in data_dict.items():
-        # Pack each item of the list into a Value object
-        value_list = [Value(string_value=str(item)) for item in values]
-        # Pack these Value objects into a ListValue
-        list_value = ListValue(values=value_list)
-        # Add the ListValue to the Struct
-        data_struct.fields[key].CopyFrom(Value(list_value=list_value))
-
-    # Create the metadata
-    # Infer the data types of each column
-    data_types = df.dtypes.apply(lambda x: x.name).to_dict()
-    # Convert the data types to string values
-    metadata = {k: str(v) for k, v in data_types.items()}
-
-    return data_struct, metadata
+    return data
 
 
-def process_sql_data_request(sqlDataRequest, ctx):
+class ClientModel(nn.Module):
+    def __init__(self, input_size):
+        super().__init__()
+        self.fc = nn.Linear(input_size, 4)
+
+    def forward(self, x):
+        return self.fc(x)
+
+
+def train_model(data, learning_rate):
+    data = torch.tensor(StandardScaler().fit_transform(data)).float()
+    model = ClientModel(data.shape[1])
+    # optimiser = torch.optim.SGD(model.parameters(), lr=learning_rate)
+
+    embedding = model(data)
+    return embedding.detach().numpy()
+
+
+# def dataframe_to_protobuf(df):
+#     # Convert the DataFrame to a dictionary of lists (one for each column)
+#     data_dict = df.to_dict(orient='list')
+#
+#     # Convert the dictionary to a Struct
+#     data_struct = Struct()
+#
+#     # Iterate over the dictionary and add each value to the Struct
+#     for key, values in data_dict.items():
+#         # Pack each item of the list into a Value object
+#         value_list = [Value(string_value=str(item)) for item in values]
+#         # Pack these Value objects into a ListValue
+#         list_value = ListValue(values=value_list)
+#         # Add the ListValue to the Struct
+#         data_struct.fields[key].CopyFrom(Value(list_value=list_value))
+#
+#     # Create the metadata
+#     # Infer the data types of each column
+#     data_types = df.dtypes.apply(lambda x: x.name).to_dict()
+#     # Convert the data types to string values
+#     metadata = {k: str(v) for k, v in data_types.items()}
+#
+#     return data_struct, metadata
+
+
+def vfl_train(requestData, ctx):
     global config
-    logger.debug("Start process_sql_data_request")
+    logger.debug("Start vfl_train")
 
     try:
-        result = load_and_query_csv(
-            config.dataset_filepath, sqlDataRequest.query)
-        logger.debug("after load and query csv")
-        data, metadata = dataframe_to_protobuf(result)
+        result = load_data(config.dataset_filepath)
+        logger.debug(result)
+        logger.debug("after load data")
 
-        return data, metadata
+        embeddings = train_model(result, 0.05)
+        logger.debug(embeddings)
+        # embeddings =
+        # embeddings = ["this is not an embedding", "nor is this",
+        #               "but it gets the ~point~ data across."]
+
+        # data, metadata = dataframe_to_protobuf(result)
+        data = Struct()
+        data.update({"embeddings": np.array_repr(embeddings)})
+
+        print(np.array_repr(embeddings), data)
+
+        return data
     except FileNotFoundError:
         logger.error(f"File not found at path {config.dataset_filepath}")
-        return None, {}
+        return None
     except Exception as e:
         logger.error(f"An error occurred: {str(e)}")
-        return None, {}
+        return None
 
 
-# ---  DYNAMOS Interface code At the Bottom -----------------------------------------------------
+# ---  DYNAMOS Interface code At the Bottom --------
 
 def request_handler(msComm: msCommTypes.MicroserviceCommunication, ctx: Context):
     global ms_config
@@ -141,16 +152,17 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication, ctx: Context)
     signal_wait(wait_for_setup_event, wait_for_setup_condition)
 
     try:
-        if msComm.request_type == "sqlDataRequest":
-            sqlDataRequest = rabbitTypes.SqlDataRequest()
-            msComm.original_request.Unpack(sqlDataRequest)
+        if msComm.request_type == "vflTrainModelRequest":
+            logger.debug("Handling VFL Training request")
+            requestData = msComm.data
+            logger.debug(requestData)
+            data = vfl_train(requestData, ctx)
+            logger.debug("Received data from VFL Training:")
+            logger.debug(data)
 
-            # with tracer.start_as_current_span("process_sql_data_request", context=ctx) as span1:
-            data, metadata = process_sql_data_request(sqlDataRequest, ctx)
-            # span1.set_attribute("handleMsCommunication finished:", metadata)
-
-            logger.debug(f"Forwarding result, metadata: {metadata}")
-            ms_config.next_client.ms_comm.send_data(msComm, data, metadata)
+            # logger.debug(f"Forwarding result, metadata: {metadata}")
+            # Ignore metadata
+            ms_config.next_client.ms_comm.send_data(msComm, data, {})
             signal_continuation(stop_event, stop_microservice_condition)
 
         else:
@@ -166,10 +178,6 @@ def main():
     global config
     global ms_config
 
-    if test:
-        logger.info("Running in test mode")
-        return
-
     ms_config = NewConfiguration(
         config.service_name, config.grpc_addr, request_handler)
 
@@ -181,14 +189,14 @@ def main():
         signal_wait(stop_event, stop_microservice_condition)
 
     except KeyboardInterrupt:
-        print("KeyboardInterrupt received, stopping server...")
+        logger.debug("KeyboardInterrupt received, stopping server...")
         signal_continuation(stop_event, stop_microservice_condition)
 
     ms_config.stop(2)
     logger.debug(f"Exiting {config.service_name}")
     sys.exit(0)
 
-# ---  END DYNAMOS Interface code At the Bottom -------------------------------------------------
+# ---  END DYNAMOS Interface code At the Bottom -----------------
 
 
 if __name__ == "__main__":

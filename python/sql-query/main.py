@@ -142,11 +142,11 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication, ctx: Context)
 
     try:
         if msComm.request_type == "sqlDataRequest":
-            sqlDataRequest = rabbitTypes.SqlDataRequest()
-            msComm.original_request.Unpack(sqlDataRequest)
+            request = rabbitTypes.Request()
+            msComm.original_request.Unpack(request)
 
             # with tracer.start_as_current_span("process_sql_data_request", context=ctx) as span1:
-            data, metadata = process_sql_data_request(sqlDataRequest, ctx)
+            data, metadata = process_sql_data_request(request, ctx)
             # span1.set_attribute("handleMsCommunication finished:", metadata)
 
             logger.debug(f"Forwarding result, metadata: {metadata}")

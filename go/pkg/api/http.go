@@ -25,15 +25,13 @@ type Auth struct {
 	RefreshToken string `json:"refreshToken"`
 }
 
-type SqlDataRequest struct {
+type Request struct {
 	Type                string            `json:"type"`
-	Query               string            `json:"query"`
-	Algorithm           string            `json:"algorithm"`
+	Data                map[string]any    `json:"query"`
 	User                map[string]string `json:"user"`
 	Auth                Auth              `json:"auth"`
 	Providers           []string          `json:"providers"`
 	AuthorizedProviders map[string]string `json:"authorizedProviders"`
-	Options             Options           `json:"options"`
 }
 
 type User struct {

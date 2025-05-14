@@ -1,5 +1,4 @@
 branch_name := $(shell git rev-parse --abbrev-ref HEAD)
-sql_microservices := sql-algorithm sql-anonymize sql-aggregate sql-test
 dynamos := sidecar policy-enforcer orchestrator agent api-gateway
 dockerhub_account := javernus
 
@@ -29,6 +28,5 @@ $(sql_microservices): prepare proto
 
 all: $(dynamos) $(sql_microservices)
 dynamos: $(dynamos)
-sql_microservices: $(sql_microservices)
 
-.PHONY: all prepare proto $(dynamos) $(sql_microservices)
+.PHONY: all prepare proto $(dynamos)
