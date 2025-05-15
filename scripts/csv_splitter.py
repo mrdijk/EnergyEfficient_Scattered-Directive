@@ -184,87 +184,87 @@ for partition in configuration["partitions"]:
 # print(deserialise_array(serialise_array(embeddings)) == embeddings)
 
 
-class ClientModel(nn.Module):
-    def __init__(self, input_size):
-        super().__init__()
-        self.fc = nn.Linear(input_size, 4)
-
-    def forward(self, x):
-        return self.fc(x)
-
-
-def serialise_array(array):
-    return json.dumps([
-        str(array.dtype),
-        array.tobytes().decode("latin1"),
-        array.shape])
-
-
-def deserialise_array(string, hook=None):
-    encoded_data = json.loads(string, object_pairs_hook=hook)
-    dataType = np.dtype(encoded_data[0])
-    dataArray = np.frombuffer(encoded_data[1].encode("latin1"), dataType)
-
-    if len(encoded_data) > 2:
-        return dataArray.reshape(encoded_data[2])
-
-    return dataArray
-
-
-def train_model(data, model):
-    embedding = model(data)
-    return embedding.detach().numpy()
-
-
-def vfl_evaluate(data, model, optimiser, gradients):
-    print("Start vfl_evaluate")
-
-    try:
-        model.zero_grad()
-        embedding = model(data)
-        embedding.backward(torch.from_numpy(gradients))
-        optimiser.step()
-    except Exception as e:
-        print(f"Error occurred: {e}")
-
-
-# Note: Gradients sent by server are for this client only to preserve privacy
-def vfl_train(learning_rate, model_state, gradients):
-    global config
-
-    try:
-        data = pd.read_csv('./python/vfl-train/datasets/alphaData.csv')[1:20]
-    except Exception as e:
-        print(f"Error occurred: {e}")
-
-        # If data does not exist, shut down service
-        print("Shutting down the service")
-        return None, None
-
-    data = torch.tensor(StandardScaler().fit_transform(data)).float()
-    model = ClientModel(data.shape[1])
-
-    if model_state is not None:
-        print(model_state)
-        model.load_state_dict(torch.load(
-            io.BytesIO(model_state.encode("latin1"))))
-
-    optimiser = torch.optim.SGD(model.parameters(), lr=learning_rate)
-
-    if gradients is not None:
-        vfl_evaluate(data, model, optimiser, gradients)
-
-    embeddings = train_model(data, model)
-    model_state = model.state_dict()
-
-    buffer = io.BytesIO()
-    torch.save(model_state, buffer)
-
-    data = Struct()
-    data.update({"embeddings": serialise_array(embeddings),
-                 "model_state": buffer.getvalue().decode("latin1")})
-
-    return data
-
-
-vfl_train(0.05, None, None)
+# class ClientModel(nn.Module):
+#     def __init__(self, input_size):
+#         super().__init__()
+#         self.fc = nn.Linear(input_size, 4)
+#
+#     def forward(self, x):
+#         return self.fc(x)
+#
+#
+# def serialise_array(array):
+#     return json.dumps([
+#         str(array.dtype),
+#         array.tobytes().decode("latin1"),
+#         array.shape])
+#
+#
+# def deserialise_array(string, hook=None):
+#     encoded_data = json.loads(string, object_pairs_hook=hook)
+#     dataType = np.dtype(encoded_data[0])
+#     dataArray = np.frombuffer(encoded_data[1].encode("latin1"), dataType)
+#
+#     if len(encoded_data) > 2:
+#         return dataArray.reshape(encoded_data[2])
+#
+#     return dataArray
+#
+#
+# def train_model(data, model):
+#     embedding = model(data)
+#     return embedding.detach().numpy()
+#
+#
+# def vfl_evaluate(data, model, optimiser, gradients):
+#     print("Start vfl_evaluate")
+#
+#     try:
+#         model.zero_grad()
+#         embedding = model(data)
+#         embedding.backward(torch.from_numpy(gradients))
+#         optimiser.step()
+#     except Exception as e:
+#         print(f"Error occurred: {e}")
+#
+#
+# # Note: Gradients sent by server are for this client only to preserve privacy
+# def vfl_train(learning_rate, model_state, gradients):
+#     global config
+#
+#     try:
+#         data = pd.read_csv('./python/vfl-train/datasets/alphaData.csv')[1:20]
+#     except Exception as e:
+#         print(f"Error occurred: {e}")
+#
+#         # If data does not exist, shut down service
+#         print("Shutting down the service")
+#         return None, None
+#
+#     data = torch.tensor(StandardScaler().fit_transform(data)).float()
+#     model = ClientModel(data.shape[1])
+#
+#     if model_state is not None:
+#         print(model_state)
+#         model.load_state_dict(torch.load(
+#             io.BytesIO(model_state.encode("latin1"))))
+#
+#     optimiser = torch.optim.SGD(model.parameters(), lr=learning_rate)
+#
+#     if gradients is not None:
+#         vfl_evaluate(data, model, optimiser, gradients)
+#
+#     embeddings = train_model(data, model)
+#     model_state = model.state_dict()
+#
+#     buffer = io.BytesIO()
+#     torch.save(model_state, buffer)
+#
+#     data = Struct()
+#     data.update({"embeddings": serialise_array(embeddings),
+#                  "model_state": buffer.getvalue().decode("latin1")})
+#
+#     return data
+#
+#
+# vfl_train(0.05, None, None)

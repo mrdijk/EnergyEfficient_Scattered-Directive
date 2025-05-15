@@ -82,6 +82,19 @@ class ClientModel(nn.Module):
         return self.fc(x)
 
 
+def serialise_dictionary(dictionary):
+    buffer = io.BytesIO()
+    torch.save(dictionary, buffer)
+
+    return buffer.getvalue().decode("latin1")
+
+
+def deserialise_dictionary(dictionary):
+    data = json.loads(dictionary, object_pairs_hook=OrderedDict)
+
+    return torch.load(io.BytesIO(data.encode("latin1")))
+
+
 def serialise_array(array):
     return json.dumps([
         str(array.dtype),
@@ -136,8 +149,7 @@ def vfl_train(learning_rate, model_state, gradients):
 
     if model_state is not None:
         print(model_state)
-        model.load_state_dict(torch.load(
-            io.BytesIO(model_state.encode("latin1"))))
+        model.load_state_dict(model_state)
 
     optimiser = torch.optim.SGD(model.parameters(), lr=learning_rate)
 
@@ -186,10 +198,7 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication, ctx: Context)
 
             try:
                 model_state = request.data["model_state"].string_value
-                print(model_state)
-                model_state = json.loads(
-                    model_state, object_pairs_hook=OrderedDict)
-                print(model_state)
+                model_state = deserialise_dictionary(model_state)
             except Exception as e:
                 print(e, request.data["model_state"])
                 model_state = None

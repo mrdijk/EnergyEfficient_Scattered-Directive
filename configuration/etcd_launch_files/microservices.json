@@ -1,32 +1,14 @@
 [
   {
-    "name": "vfl-train",
-    "label": "dataProvider",
-    "allowedOutputs": ["vfl-compute"],
-    "invalidArchetypes": []
-  },
-  {
     "name": "vfl-train-model",
-    "label": "dataProvider",
-    "allowedOutputs": ["vfl-aggregate"],
-    "invalidArchetypes": []
-  },
-  {
-    "name": "vfl-run",
-    "label": "dataProvider",
-    "allowedOutputs": [],
-    "invalidArchetypes": []
-  },
-  {
-    "name": "vfl-aggregate",
     "label": "computeProvider",
-    "allowedOutputs": [],
+    "allowedOutputs": ["vfl-train"],
     "invalidArchetypes": []
   },
   {
-    "name": "vfl-compute",
+    "name": "vfl-train",
     "label": "computeProvider",
-    "allowedOutputs": [],
+    "allowedOutputs": ["vfl-train-model"],
     "invalidArchetypes": []
   }
 ]
