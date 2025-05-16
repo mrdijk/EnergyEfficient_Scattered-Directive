@@ -139,7 +139,8 @@ def vfl_train(learning_rate, model_state, gradients):
     except Exception as e:
         logger.error(f"Error occurred: {e}")
 
-        # If data does not exist, shut down service
+        # If data does not exist, the service is not supposed to be run on
+        # this agent, so we shut down the service
         logger.error("Shutting down the service")
         signal_continuation(stop_event, stop_microservice_condition)
         return None, None
@@ -171,7 +172,8 @@ def vfl_train(learning_rate, model_state, gradients):
 
 # ---  DYNAMOS Interface code At the Bottom --------
 
-def request_handler(msComm: msCommTypes.MicroserviceCommunication, ctx: Context):
+def request_handler(msComm: msCommTypes.MicroserviceCommunication,
+                    ctx: Context = None):
     global ms_config
     logger.info(f"Received original request type: {msComm.request_type}")
     logger.debug(msComm)
@@ -181,26 +183,25 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication, ctx: Context)
 
     try:
         if msComm.request_type == "vflTrainRequest":
-            request = rabbitTypes.Request()
-            msComm.original_request.Unpack(request)
+            logger.info("Received a vflTrainRequest.")
 
             try:
-                learning_rate = request.data["learning_rate"].number_value
+                learning_rate = msComm.data["learning_rate"].number_value
             except Exception:
                 learning_rate = 0.05
 
             try:
-                gradients = request.data["gradients"].string_value
+                gradients = msComm.data["gradients"].string_value
                 gradients = deserialise_array(gradients)
             except Exception as e:
-                print(e, request.data["gradients"])
+                print(e, msComm.data["gradients"])
                 gradients = None
 
             try:
-                model_state = request.data["model_state"].string_value
+                model_state = msComm.data["model_state"].string_value
                 model_state = deserialise_dictionary(model_state)
             except Exception as e:
-                print(e, request.data["model_state"])
+                print(e, msComm.data["model_state"])
                 model_state = None
 
             logger.debug("Handling VFL Training request")
@@ -209,9 +210,12 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication, ctx: Context)
             logger.debug("Received data from VFL Training:")
             logger.debug(data)
 
+            msComm.request_type = "vflClientTrainingCompleteRequest"
+
             # Ignore metadata
             ms_config.next_client.ms_comm.send_data(msComm, data, {})
-            signal_continuation(stop_event, stop_microservice_condition)
+            # Persist. Only die when server tells you you're done
+            # signal_continuation(stop_event, stop_microservice_condition)
 
         else:
             logger.error(f"An unknown request_type: {msComm.request_type}")

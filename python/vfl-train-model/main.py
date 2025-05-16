@@ -61,7 +61,7 @@ clients_embeddings = []
 def load_data(file_path):
     DATA_STEWARD_NAME = os.getenv("DATA_STEWARD_NAME").lower()
 
-    file_name = f"{file_path}/{DATA_STEWARD_NAME}Data.csv"
+    file_name = f"{file_path}/outcomeData.csv"
 
     if DATA_STEWARD_NAME == "":
         logger.error("DATA_STEWARD_NAME not set.")
@@ -170,9 +170,84 @@ def aggregate_fit(results):
     return serialise_array(np_gradients), metrics_aggregated
 
 
+def handleVflTrainModelRequest(msComm):
+    global ms_config
+    global server_configuration
+
+    request = rabbitTypes.Request()
+    msComm.original_request.Unpack(request)
+
+    try:
+        learning_rate = request.data["learning_rate"].number_value
+    except Exception:
+        learning_rate = 0.01
+
+    server_configuration["learning_rate"] = learning_rate
+
+    try:
+        cycles = request.data["cycles"].number_value
+    except Exception:
+        cycles = 10
+
+    server_configuration["cycles"] = cycles
+
+    data = Struct()
+    data.update({
+        "learning_rate": server_configuration["learning_rate"]
+    })
+
+    msComm.request_type = "vflTrainRequest"
+    # request.data = data
+    # msComm.original_request.Pack(request)
+
+    logger.debug("Handling VFL Model Training request")
+    # TODO: Send msComm message to run a training round
+    ms_config.next_client.ms_comm.send_data(msComm, data, {})
+
+    # We do not shut off the microservice, as we want this to
+    # be a persistent microservice (or "ephemeral but long-lived")
+    # signal_continuation(stop_event, stop_microservice_condition)
+
+
+def handleVflClientTrainingCompleteRequest(msComm):
+    global ms_config
+    global server_configuration
+    global clients_embeddings
+    global clients_model_state
+
+    request = rabbitTypes.Request()
+    msComm.original_request.Unpack(request)
+
+    try:
+        data = request.data["embeddings"].string_value
+        clients_embeddings += [deserialise_array(data)]
+    except Exception as e:
+        logger.error(f"Errored when deserialising client data: {e}")
+
+    try:
+        data = request.data["model_state"].string_value
+        clients_model_state += [data]
+    except Exception as e:
+        logger.error(
+            f"Errored when deserialising client model state: {e}")
+
+    # Hardcoded the number of clients for now
+    if len(clients_embeddings) == 3:
+        gradients, accuracy = aggregate_fit(clients_embeddings)
+
+        server_configuration["cycles"] -= 1
+
+        if server_configuration["cycles"] == 0:
+            ms_config.next_client.ms_comm.send_data(msComm, None, {})
+
+        # TODO: Send msComm message to run a new training round
+        # With gradients this time (also give back model state)
+
+
 # ---  DYNAMOS Interface code At the Bottom --------
 
-def request_handler(msComm: msCommTypes.MicroserviceCommunication, ctx: Context):
+def request_handler(msComm: msCommTypes.MicroserviceCommunication,
+                    ctx: Context = None):
     global ms_config
     global server_configuration
     global clients_embeddings
@@ -186,60 +261,13 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication, ctx: Context)
     try:
         # This is the entry-point from the user request
         if msComm.request_type == "vflTrainModelRequest":
-            request = rabbitTypes.Request()
-            msComm.original_request.Unpack(request)
-
-            try:
-                learning_rate = request.data["learning_rate"].number_value
-            except Exception:
-                learning_rate = 0.01
-
-            server_configuration["learning_rate"] = learning_rate
-
-            try:
-                cycles = request.data["cycles"].number_value
-            except Exception:
-                cycles = 10
-
-            server_configuration["cycles"] = cycles
-
-            logger.debug("Handling VFL Model Training request")
-            # TODO: Send msComm message to run a training round
-            ms_config.next_client.ms_comm.send_data(msComm, None, {})
-
-            # We do not shut off the microservice, as we want this to
-            # be a persistent microservice (or "ephemeral but long-lived")
-            # signal_continuation(stop_event, stop_microservice_condition)
+            logger.info("Received a vflTrainModelRequest.")
+            handleVflTrainModelRequest(msComm)
 
         # Receiving data from clients -> Run aggregation if all are received
         elif msComm.request_type == "vflClientTrainingCompleteRequest":
-            request = rabbitTypes.Request()
-            msComm.original_request.Unpack(request)
-
-            try:
-                data = request.data["embeddings"].string_value
-                clients_embeddings += [deserialise_array(data)]
-            except Exception as e:
-                logger.error(f"Errored when deserialising client data: {e}")
-
-            try:
-                data = request.data["model_state"].string_value
-                clients_model_state += [data]
-            except Exception as e:
-                logger.error(
-                    f"Errored when deserialising client model state: {e}")
-
-            # Hardcoded the number of clients for now
-            if len(clients_embeddings) == 3:
-                gradients, accuracy = aggregate_fit(clients_embeddings)
-
-                server_configuration["cycles"] -= 1
-
-                if server_configuration["cycles"] == 0:
-                    ms_config.next_client.ms_comm.send_data(msComm, None, {})
-
-                # TODO: Send msComm message to run a new training round
-                # With gradients this time (also give back model state)
+            logger.info("Received a vflClientTrainingCompleteRequest.")
+            handleVflClientTrainingCompleteRequest(msComm)
 
         return Empty()
     except Exception as e:
@@ -252,6 +280,12 @@ def main():
     global ms_config
     global server_configuration
     global server_data
+
+    DATA_STEWARD_NAME = os.getenv("DATA_STEWARD_NAME").lower()
+
+    if DATA_STEWARD_NAME != "omnia":
+        logger.info("This is not the server, shutting down.")
+        sys.exit(0)
 
     server_data = load_data(config.dataset_filepath)
 

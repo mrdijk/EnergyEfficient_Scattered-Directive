@@ -31,10 +31,13 @@ from opentelemetry.context.context import Context
 logger = InitLogger()
 
 # Global map to register functions
-global_function_map: Dict[str, Callable[[msCommTypes.MicroserviceCommunication, Context], Empty]] = {}
+global_function_map: Dict[str, Callable[[
+    msCommTypes.MicroserviceCommunication, Context], Empty]] = {}
+
 
 def register_function(name: str, handler: Callable[[msCommTypes.MicroserviceCommunication, Context], Empty]):
     global_function_map[name] = handler
+
 
 def get_and_call_function(name: str, msComm: msCommTypes.MicroserviceCommunication, ctx: Context) -> Empty:
     """
@@ -57,6 +60,7 @@ def get_and_call_function(name: str, msComm: msCommTypes.MicroserviceCommunicati
     else:
         raise ValueError(f"No function registered under the name: {name}")
 
+
 class Configuration:
     def __init__(self,
                  job_name,
@@ -64,7 +68,7 @@ class Configuration:
                  first_service,
                  last_service,
                  service_name,
-                 ms_message_handler : Callable[[msCommTypes.MicroserviceCommunication], Empty]):
+                 ms_message_handler: Callable[[msCommTypes.MicroserviceCommunication], Empty]):
         self.job_name = job_name
         self.Port = port
         self.first_service = first_service
@@ -84,12 +88,13 @@ class Configuration:
             if self.next_client:
                 self.next_client.close_program()
         except Exception as e:
-            logger.error(f"An error occurred while stopping the configuration: {e}")
+            logger.error(
+                f"An error occurred while stopping the configuration: {e}")
 
         time.sleep(sleep_time)
 
 
-def request_handler(msComm : msCommTypes.MicroserviceCommunication):
+def request_handler(msComm: msCommTypes.MicroserviceCommunication):
     """
     Handles the incoming microservice communication message.
 
@@ -159,8 +164,8 @@ def get_env_var(var_name):
 
 
 def NewConfiguration(service_name,
-                      grpc_addr,
-                      ms_message_handler:  Callable[[msCommTypes.MicroserviceCommunication],Empty ]):
+                     grpc_addr,
+                     ms_message_handler:  Callable[[msCommTypes.MicroserviceCommunication], Empty]):
     """
     Creates a new configuration object for a setting up a Microservice Chain.
 
@@ -180,7 +185,8 @@ def NewConfiguration(service_name,
     first_service = int(get_env_var("FIRST"))
     last_service = int(get_env_var("LAST"))
     job_name = get_env_var("JOB_NAME")
-    logger.debug(f"NewConfiguration {service_name}, \njob_name: {job_name} \nport: {port},  \nfirst_service: {first_service},  \nlast_service: {last_service}")
+    logger.debug(f"NewConfiguration {service_name}, \njob_name: {job_name} \nport: {
+                 port},  \nfirst_service: {first_service},  \nlast_service: {last_service}")
 
     conf = Configuration(
         job_name=job_name,
@@ -193,22 +199,29 @@ def NewConfiguration(service_name,
 
     if conf.first_service:
         # First and possibly last, connect to sidecar for processing and final destination
-        conf.grpc_server = GRPCServer(grpc_addr + str(conf.Port), request_handler)
-        conf.rabbit_msg_client = GRPCClient(grpc_addr + os.getenv("SIDECAR_PORT"), service_name)
+        conf.grpc_server = GRPCServer(
+            grpc_addr + str(conf.Port), request_handler)
+        conf.rabbit_msg_client = GRPCClient(
+            grpc_addr + os.getenv("SIDECAR_PORT"), service_name)
         if conf.last_service:
             conf.next_client = conf.rabbit_msg_client
         else:
-            conf.next_client = GRPCClient(grpc_addr + str(conf.Port + 1), service_name)
+            conf.next_client = GRPCClient(
+                grpc_addr + str(conf.Port + 1), service_name)
 
         # Send a message to the RabbitMQ server to initialize the connection
         conf.rabbit_msg_client.rabbit.initialize_rabbit(job_name, conf.Port)
 
     elif conf.last_service:
         # Last service, connect to sidecar as final destination and start own server to receive from previous MS
-        conf.grpc_server = GRPCServer(grpc_addr + str(conf.Port), ms_message_handler)
-        conf.next_client = GRPCClient(grpc_addr + os.getenv("SIDECAR_PORT"), service_name)
+        conf.grpc_server = GRPCServer(
+            grpc_addr + str(conf.Port), ms_message_handler)
+        conf.next_client = GRPCClient(
+            grpc_addr + os.getenv("SIDECAR_PORT"), service_name)
     else:
-        conf.grpc_server = GRPCServer(grpc_addr + str(conf.Port), ms_message_handler)
-        conf.next_client = GRPCClient(grpc_addr + str(conf.Port + 1), service_name)
+        conf.grpc_server = GRPCServer(
+            grpc_addr + str(conf.Port), ms_message_handler)
+        conf.next_client = GRPCClient(
+            grpc_addr + str(conf.Port + 1), service_name)
 
     return conf

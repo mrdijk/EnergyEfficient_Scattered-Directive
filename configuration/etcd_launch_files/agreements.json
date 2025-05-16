@@ -1,21 +1,17 @@
 [
   {
-    "name": "server",
+    "name": "omnia",
     "relations": {
       "jake.jongejans@student.uva.nl": {
         "ID": "GUID",
-        "requestTypes": [
-          "vflTrainModelRequest",
-          "vflAggregateRequest",
-          "vflRunRequest"
-        ],
+        "requestTypes": ["vflTrainModelRequest"],
         "dataSets": ["outcomeData"],
-        "allowedArchetypes": ["computeToData", "dataThroughTtp"],
-        "allowedComputeProviders": ["omnia", "scientia"]
+        "allowedArchetypes": ["computeToData"],
+        "allowedComputeProviders": ["omnia"]
       }
     },
-    "computeProviders": ["omnia", "scientia"],
-    "archetypes": ["computeToData", "dataThroughTtp"]
+    "computeProviders": ["omnia"],
+    "archetypes": ["computeToData"]
   },
   {
     "name": "alpha",
@@ -24,12 +20,12 @@
         "ID": "GUID",
         "requestTypes": ["vflTrainRequest"],
         "dataSets": ["alphaData"],
-        "allowedArchetypes": ["computeToData", "dataThroughTtp"],
-        "allowedComputeProviders": ["alpha", "omnia"]
+        "allowedArchetypes": ["computeToData"],
+        "allowedComputeProviders": ["alpha"]
       }
     },
-    "computeProviders": ["alpha", "omnia"],
-    "archetypes": ["computeToData", "dataThroughTtp"]
+    "computeProviders": ["alpha"],
+    "archetypes": ["computeToData"]
   },
   {
     "name": "enigma",
@@ -38,12 +34,12 @@
         "ID": "GUID",
         "requestTypes": ["vflTrainRequest"],
         "dataSets": ["enigmaData"],
-        "allowedArchetypes": ["computeToData", "dataThroughTtp"],
-        "allowedComputeProviders": ["enigma", "scientia"]
+        "allowedArchetypes": ["computeToData"],
+        "allowedComputeProviders": ["enigma"]
       }
     },
-    "computeProviders": ["enigma", "scientia"],
-    "archetypes": ["computeToData", "dataThroughTtp"]
+    "computeProviders": ["enigma"],
+    "archetypes": ["computeToData"]
   },
   {
     "name": "zenith",
@@ -52,11 +48,11 @@
         "ID": "GUID",
         "requestTypes": ["vflTrainRequest"],
         "dataSets": ["zenithData"],
-        "allowedArchetypes": ["computeToData", "dataThroughTtp"],
-        "allowedComputeProviders": ["zenith", "scientia"]
+        "allowedArchetypes": ["computeToData"],
+        "allowedComputeProviders": ["zenith"]
       }
     },
-    "computeProviders": ["zenith", "scientia"],
-    "archetypes": ["computeToData", "dataThroughTtp"]
+    "computeProviders": ["zenith"],
+    "archetypes": ["computeToData"]
   }
 ]

@@ -8,7 +8,7 @@
   {
     "name": "vfl-train",
     "label": "computeProvider",
-    "allowedOutputs": ["vfl-train-model"],
+    "allowedOutputs": [],
     "invalidArchetypes": []
   }
 ]

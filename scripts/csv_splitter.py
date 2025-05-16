@@ -268,3 +268,7 @@ for partition in configuration["partitions"]:
 #
 #
 # vfl_train(0.05, None, None)
+
+
+# data = pd.read_csv('./python/vfl-train-model/datasets/outcomeData.csv')[1:20]
+#
