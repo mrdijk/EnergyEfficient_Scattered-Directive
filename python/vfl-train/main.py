@@ -193,20 +193,17 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication,
             try:
                 gradients = msComm.data["gradients"].string_value
                 gradients = deserialise_array(gradients)
-            except Exception as e:
-                print(e, msComm.data["gradients"])
+            except Exception:
                 gradients = None
 
             try:
                 model_state = msComm.data["model_state"].string_value
                 model_state = deserialise_dictionary(model_state)
-            except Exception as e:
-                print(e, msComm.data["model_state"])
+            except Exception:
                 model_state = None
 
             logger.debug("Handling VFL Training request")
-            data = vfl_train(
-                learning_rate, model_state, gradients)
+            data = vfl_train(learning_rate, model_state, gradients)
             logger.debug("Received data from VFL Training:")
             logger.debug(data)
 

@@ -19,7 +19,7 @@ var logLevel = zap.DebugLevel
 var requestTypeConfigLocation = addEtcdDir("requestType.json")
 var archetypeConfigLocation = addEtcdDir("archetype.json")
 var microserviceMetadataConfigLocation = addEtcdDir("microservices.json")
-var agreementsConfigLocation = addEtcdDir("agreements.json")
+var agreementsConfigLocation = addEtcdDir("agreements.jsonc")
 var dataSetConfigLocation = addEtcdDir("datasets.json")
 var optionalMSConfigLocation = addEtcdDir("optional_microservices.json")
 

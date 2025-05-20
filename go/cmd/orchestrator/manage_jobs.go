@@ -84,6 +84,7 @@ func checkJobs(agreement *api.Agreement) {
 		}
 
 		// New agreement has no allowed archetypes
+		// Should have mapped over list, checked if any != "". This is not foolproof. Anyway.
 		if len(relationDetails.AllowedArchetypes) == 0 || (relationDetails.AllowedArchetypes[0] == "" && len(relationDetails.AllowedArchetypes) == 1) {
 			logger.Debug("This user no has no allowed archetypes")
 			if len(jobNames) > 0 {
