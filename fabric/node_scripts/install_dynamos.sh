@@ -48,7 +48,7 @@ echo -e "127.0.0.1 api-gateway.api-gateway.svc.cluster.local" | sudo tee -a /etc
 
 git clone https://github.com/Javernus/DYNAMOS.git
 
-# curl -H "Host: api-gateway.api-gateway.svc.cluster.local" http://10.145.3.3:32389/api/v1/requestApproval \
+# curl -H "Host: api-gateway.api-gateway.svc.cluster.local" http://10.145.6.3:31813/api/v1/requestApproval \
 # --header 'Content-Type: application/json' \
 # --data-raw '{
 #     "type": "sqlDataRequest",
@@ -66,6 +66,46 @@ git clone https://github.com/Javernus/DYNAMOS.git
 #             "aggregate": false
 #         },
 #         "requestMetadata": {}
+#     }
+# }'
+
+# curl -H "Host: api-gateway.api-gateway.svc.cluster.local" http://10.145.6.3:31813/api/v1/requestApproval \
+# --header 'Content-Type: application/json' \
+# --data-raw '{
+#     "type": "vflTrainRequest",
+#     "user": {
+#         "id": "1234",
+#         "userName": "jake.jongejans@student.uva.nl"
+#     },
+#     "dataProviders": ["alpha"],
+#     "data_request": {
+#         "type": "vflTrainRequest",
+#         "data": {
+#           "learning_rate": 0.05
+#         },
+#         "requestMetadata": {}
+#     }
+# }'
+
+# DYNAMOS_PORT=$(kubectl get svc -n ingress | grep "nginx-nginx-ingress-controller" | sed "s/.*80:\([0-9]*\)\/TCP.*/\1/")
+# DYNAMOS_IP=$(kubectl get nodes -o wide | grep dynamos | sed "s/.*\s\([0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\).*/\1/")
+
+# curl -H "Host: api-gateway.api-gateway.svc.cluster.local" http://$DYNAMOS_IP:$DYNAMOS_PORT/api/v1/requestApproval \
+# --header 'Content-Type: application/json' \
+# --data-raw '{
+#     "type": "vflTrainModelRequest",
+#     "user": {
+#         "id": "1234",
+#         "userName": "jake.jongejans@student.uva.nl"
+#     },
+#     "dataProviders": ["alpha", "enigma", "omnia", "zenith"],
+#     "data_request": {
+#         "type": "vflTrainModelRequest",
+#         "data": {
+#           "learning_rate": 0.05,
+#           "cycles": 50
+#         },
+# "requestMetadata": {}
 #     }
 # }'
 
