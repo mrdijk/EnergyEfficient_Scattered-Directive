@@ -1,15 +1,54 @@
 [
   {
-    "name": "a1-server",
+    "name": "server",
     "relations": {
       "jake.jongejans@student.uva.nl": {
         "ID": "GUID",
         "requestTypes": ["vflTrainModelRequest"],
         "allowedArchetypes": ["vflRequest"],
-        "allowedComputeProviders": ["a2-client-1", "a2-client-2", "a2-client-3"]
+        "allowedComputeProviders": ["clientone", "clienttwo", "clientthree"]
       }
     },
-    "computeProviders": ["a1-server"],
+    "computeProviders": ["server"],
+    "archetypes": ["computeToData"]
+  },
+  {
+    "name": "clientone",
+    "relations": {
+      "jake.jongejans@student.uva.nl": {
+        "ID": "GUID",
+        "requestTypes": ["vflTrainRequest"],
+        "allowedArchetypes": ["computeToData"],
+        "allowedComputeProviders": ["clientone"]
+      }
+    },
+    "computeProviders": ["clientone"],
+    "archetypes": ["computeToData"]
+  },
+  {
+    "name": "clienttwo",
+    "relations": {
+      "jake.jongejans@student.uva.nl": {
+        "ID": "GUID",
+        "requestTypes": ["vflTrainRequest"],
+        "allowedArchetypes": ["computeToData"],
+        "allowedComputeProviders": ["clienttwo"]
+      }
+    },
+    "computeProviders": ["clienttwo"],
+    "archetypes": ["computeToData"]
+  },
+  {
+    "name": "clientthree",
+    "relations": {
+      "jake.jongejans@student.uva.nl": {
+        "ID": "GUID",
+        "requestTypes": ["vflTrainRequest"],
+        "allowedArchetypes": ["computeToData"],
+        "allowedComputeProviders": ["clientthree"]
+      }
+    },
+    "computeProviders": ["clientthree"],
     "archetypes": ["computeToData"]
   }
 ]

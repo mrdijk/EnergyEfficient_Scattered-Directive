@@ -9,17 +9,17 @@
       "columns": ["Survived"]
     },
     {
-      "name": "alphaData",
+      "name": "clientoneData",
       "outputDirectory": "./python/vfl-train/datasets/",
       "columns": ["Cabin", "Parch", "Pclass"]
     },
     {
-      "name": "enigmaData",
+      "name": "clienttwoData",
       "outputDirectory": "./python/vfl-train/datasets/",
       "columns": ["Sex", "Title"]
     },
     {
-      "name": "zenithData",
+      "name": "clientthreeData",
       "outputDirectory": "./python/vfl-train/datasets/",
       "columns": ["Age", "Embarked", "Fare", "SibSp"]
     }
