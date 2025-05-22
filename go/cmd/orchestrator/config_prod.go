@@ -17,7 +17,7 @@ var logLevel = zap.DebugLevel
 var requestTypeConfigLocation = root + "requestType.json"
 var archetypeConfigLocation = root + "archetype.json"
 var microserviceMetadataConfigLocation = root + "microservices.json"
-var agreementsConfigLocation = root + "agreements.jsonc"
+var agreementsConfigLocation = root + "agreements.json"
 var dataSetConfigLocation = root + "datasets.json"
 var optionalMSConfigLocation = root + "optional_microservices.json"
 
