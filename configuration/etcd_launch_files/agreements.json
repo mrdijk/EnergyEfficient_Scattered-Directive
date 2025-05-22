@@ -1,0 +1,15 @@
+[
+  {
+    "name": "omnia",
+    "relations": {
+      "jake.jongejans@student.uva.nl": {
+        "ID": "GUID",
+        "requestTypes": ["vflTrainModelRequest"],
+        "allowedArchetypes": ["vflRequest"],
+        "allowedComputeProviders": ["alpha", "enigma", "zenith"]
+      }
+    },
+    "computeProviders": ["omnia"],
+    "archetypes": ["computeToData"]
+  }
+]
