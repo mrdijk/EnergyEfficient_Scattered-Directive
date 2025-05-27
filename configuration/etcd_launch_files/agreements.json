@@ -5,12 +5,12 @@
       "jake.jongejans@student.uva.nl": {
         "ID": "GUID",
         "requestTypes": ["vflTrainModelRequest"],
-        "allowedArchetypes": ["vflRequest"],
+        "allowedArchetypes": ["trainThroughClients"],
         "allowedComputeProviders": ["clientone", "clienttwo", "clientthree"]
       }
     },
     "computeProviders": ["server"],
-    "archetypes": ["computeToData"]
+    "archetypes": ["computeToData", "trainThroughClients"]
   },
   {
     "name": "clientone",

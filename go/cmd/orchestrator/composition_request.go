@@ -61,6 +61,7 @@ func startCompositionRequest(ctx context.Context, validationResponse *pb.Validat
 	// Use to return the proper endpoints to the user
 	userTargets := make(map[string]string)
 
+	// TODO: ComputeProvider == "clients" for VFL
 	if archetypeConfig.ComputeProvider != "other" {
 		// Compute to data
 		compositionRequest.Role = "all"
@@ -79,11 +80,13 @@ func startCompositionRequest(ctx context.Context, validationResponse *pb.Validat
 			return nil, ctx, err
 		}
 
+		// TODO: Check if this does anything? Not doing much with dataProviders
 		// Send to each validData provider the role data provider
 		// Send to the thirdParty the role Compute provider
 		compositionRequest.Role = "dataProvider"
 		tmpDataProvider := []string{}
 		for key := range authorizedProviders {
+			logger.Sugar().Infof("Sending composition request for dataProvider %s", key)
 			tmpDataProvider = append(tmpDataProvider, key)
 			compositionRequest.DestinationQueue = authorizedProviders[key].RoutingKey
 			c.SendCompositionRequest(ctx, compositionRequest)
@@ -94,6 +97,7 @@ func startCompositionRequest(ctx context.Context, validationResponse *pb.Validat
 		compositionRequest.DestinationQueue = ttp.RoutingKey
 		userTargets[ttp.Name] = ttp.Dns
 
+		logger.Sugar().Info("Sending composition request for computeProvider")
 		c.SendCompositionRequest(ctx, compositionRequest)
 	}
 	return userTargets, ctx, nil

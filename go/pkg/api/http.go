@@ -141,6 +141,7 @@ func GenericGetHandler[T any](w http.ResponseWriter, req *http.Request, etcdClie
 			http.Error(w, "Error in requesting config", http.StatusInternalServerError)
 			return
 		}
+
 		jsonData, err = json.Marshal(&targetList)
 		if err != nil {
 			logger.Sugar().Fatalw("Failed to convert map to JSON: %v", err)
@@ -156,7 +157,6 @@ func GenericGetHandler[T any](w http.ResponseWriter, req *http.Request, etcdClie
 			http.Error(w, "Unknown request", http.StatusNotFound)
 			return
 		}
-
 	}
 
 	w.WriteHeader(http.StatusOK)

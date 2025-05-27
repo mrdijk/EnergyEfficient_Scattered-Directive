@@ -189,6 +189,7 @@ func processPolicyUpdate(ctx context.Context, agentsWithThisJob map[string]*pb.C
 		}
 		key := fmt.Sprintf("/agents/jobs/%s/%s/%s", agent, policyUpdate.User.UserName, currentData.JobName)
 
+		// TODO: If compute provider is "clients" for VFL
 		if archetypeConfig.ComputeProvider != "other" {
 			if currentData.Role == "computeProvider" {
 				// Delete this job info
@@ -204,7 +205,7 @@ func processPolicyUpdate(ctx context.Context, agentsWithThisJob map[string]*pb.C
 			newData.ArchetypeId = archetype
 			newData.Role = "all"
 			newData.DataProviders = []string{}
-			err := etcd.SaveStructToEtcd[*pb.CompositionRequest](etcdClient, key, newData)
+			err := etcd.SaveStructToEtcd(etcdClient, key, newData)
 			if err != nil {
 				logger.Sugar().Errorf("Error saving struct to etcd: %v", err)
 				return
@@ -246,7 +247,7 @@ func processPolicyUpdate(ctx context.Context, agentsWithThisJob map[string]*pb.C
 				newData.Role = "dataProvider"
 				newData.DataProviders = []string{}
 
-				err = etcd.SaveStructToEtcd[*pb.CompositionRequest](etcdClient, key, newData)
+				err = etcd.SaveStructToEtcd(etcdClient, key, newData)
 				if err != nil {
 					logger.Sugar().Errorf("Error saving struct to etcd: %v", err)
 					return
