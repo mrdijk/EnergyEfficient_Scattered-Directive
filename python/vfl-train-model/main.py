@@ -283,7 +283,7 @@ def main():
 
     DATA_STEWARD_NAME = os.getenv("DATA_STEWARD_NAME").lower()
 
-    if DATA_STEWARD_NAME != "omnia":
+    if DATA_STEWARD_NAME != "server":
         logger.info("This is not the server, shutting down.")
         sys.exit(0)
 

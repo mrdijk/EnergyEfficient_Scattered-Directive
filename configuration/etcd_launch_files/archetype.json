@@ -13,8 +13,8 @@
   },
   {
     "name": "trainThroughClients",
-    "computeProvider": "clients",
-    "resultRecipient": "server",
+    "computeProvider": "other",
+    "resultRecipient": "requestor",
     "weight": 50
   }
 ]

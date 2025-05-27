@@ -10,7 +10,7 @@
       }
     },
     "computeProviders": ["server"],
-    "archetypes": ["computeToData", "trainThroughClients"]
+    "archetypes": ["trainThroughClients", "computeToData"]
   },
   {
     "name": "clientone",
@@ -18,12 +18,12 @@
       "jake.jongejans@student.uva.nl": {
         "ID": "GUID",
         "requestTypes": ["vflTrainRequest"],
-        "allowedArchetypes": ["computeToData"],
+        "allowedArchetypes": ["computeToData", "trainThroughClients"],
         "allowedComputeProviders": ["clientone"]
       }
     },
     "computeProviders": ["clientone"],
-    "archetypes": ["computeToData"]
+    "archetypes": ["trainThroughClients", "computeToData"]
   },
   {
     "name": "clienttwo",
@@ -31,12 +31,12 @@
       "jake.jongejans@student.uva.nl": {
         "ID": "GUID",
         "requestTypes": ["vflTrainRequest"],
-        "allowedArchetypes": ["computeToData"],
+        "allowedArchetypes": ["computeToData", "trainThroughClients"],
         "allowedComputeProviders": ["clienttwo"]
       }
     },
     "computeProviders": ["clienttwo"],
-    "archetypes": ["computeToData"]
+    "archetypes": ["trainThroughClients", "computeToData"]
   },
   {
     "name": "clientthree",
@@ -44,11 +44,11 @@
       "jake.jongejans@student.uva.nl": {
         "ID": "GUID",
         "requestTypes": ["vflTrainRequest"],
-        "allowedArchetypes": ["computeToData"],
+        "allowedArchetypes": ["computeToData", "trainThroughClients"],
         "allowedComputeProviders": ["clientthree"]
       }
     },
     "computeProviders": ["clientthree"],
-    "archetypes": ["computeToData"]
+    "archetypes": ["trainThroughClients", "computeToData"]
   }
 ]

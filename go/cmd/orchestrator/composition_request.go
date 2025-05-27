@@ -66,6 +66,7 @@ func startCompositionRequest(ctx context.Context, validationResponse *pb.Validat
 		// Compute to data
 		compositionRequest.Role = "all"
 		for key := range authorizedProviders {
+			logger.Sugar().Infof("Sending composition request for dataProvider %s", key)
 			compositionRequest.DestinationQueue = authorizedProviders[key].RoutingKey
 			c.SendCompositionRequest(ctx, compositionRequest)
 			userTargets[key] = authorizedProviders[key].Dns
@@ -123,10 +124,14 @@ func pickArchetypeBasedOnWeight() (*api.Archetype, error) {
 
 	// Iterate to find the one with the lowest weight
 	for _, archeType := range archeTypes {
+		logger.Sugar().Info(archeType)
 		if archeType.Weight < lightest.Weight {
+			logger.Sugar().Info("is lightest? ", archeType, archeType.Weight < lightest.Weight)
 			lightest = archeType
 		}
 	}
+
+	logger.Sugar().Info("lightest: ", lightest)
 
 	return lightest, nil
 }
@@ -161,9 +166,10 @@ func getArchetypeBasedOnOptions(validationResponse *pb.ValidationResponse, autho
 // TODO: Make smarter
 func chooseArchetype(validationResponse *pb.ValidationResponse, authorizedDataProviders map[string]lib.AgentDetails) (string, error) {
 	logger.Sugar().Debug("starting chooseArchetype")
+	logger.Sugar().Debug(validationResponse)
 	logger.Sugar().Debugf("length options: %v", len(validationResponse.Options))
 
-	for k, _ := range validationResponse.ValidDataproviders {
+	for k := range validationResponse.ValidDataproviders {
 		logger.Sugar().Debug("validDataprovider: %s ", k)
 	}
 

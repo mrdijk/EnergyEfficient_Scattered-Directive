@@ -17,6 +17,7 @@
 #     spec:
 #       nodeSelector:
 #         kubernetes.io/hostname: %WORKER%
+#       nodeName: %WORKER%
 #       serviceAccountName: job-creator-%WORKER%
 #       containers:
 #       - name: %WORKER%
