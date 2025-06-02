@@ -43,7 +43,7 @@ func requestHandler() http.HandlerFunc {
 			UserName: apiReqApproval.User.UserName,
 		}
 
-		var dataRequestInterface map[string]interface{}
+		var dataRequestInterface map[string]any
 		if err := json.Unmarshal(apiReqApproval.DataRequest, &dataRequestInterface); err != nil {
 			logger.Sugar().Errorf("Error unmarhsalling get request: %v", err)
 			return
@@ -95,18 +95,25 @@ func requestHandler() http.HandlerFunc {
 			}
 			dataRequestInterface["requestMetadata"] = requestMetadata
 
-			// Marshal the combined data back into JSON for forwarding
-			dataRequestJson, err := json.Marshal(dataRequestInterface)
-			if err != nil {
-				logger.Sugar().Errorf("Error marshalling combined data: %v", err)
-				return
+			logger.Sugar().Infof("Data Prepared jsonData: %s", dataRequestInterface)
+
+			var response []byte
+
+			if apiReqApproval.Type == "vflTrainModelRequest" {
+				response = runVFLTraining(dataRequestInterface, msg.AuthorizedProviders, msg.JobId)
+			} else {
+				// Marshal the combined data back into JSON for forwarding
+				dataRequestJson, err := json.Marshal(dataRequestInterface)
+				if err != nil {
+					logger.Sugar().Errorf("Error marshalling combined data: %v", err)
+					return
+				}
+
+				response = sendDataToAuthProviders(dataRequestJson, msg.AuthorizedProviders, apiReqApproval.Type, msg.JobId)
 			}
 
-			logger.Sugar().Infof("Data Prepared jsonData: %s", dataRequestJson)
-
-			responses := sendDataToAuthProviders(dataRequestJson, msg.AuthorizedProviders, apiReqApproval.Type, msg.JobId)
 			w.WriteHeader(http.StatusOK)
-			w.Write(responses)
+			w.Write(response)
 			return
 
 		case <-ctx.Done():
@@ -114,6 +121,188 @@ func requestHandler() http.HandlerFunc {
 			return
 		}
 	}
+}
+
+// This runs a single round of traingin
+func runVFLTrainingRound(dataRequest map[string]any, clients map[string]string, serverAuth string, serverUrl string) ([]string, error) {
+	var wg sync.WaitGroup
+	var responses []string
+
+	for auth, url := range clients {
+		wg.Add(1)
+		target := strings.ToLower(auth)
+		endpoint := fmt.Sprintf("http://%s:8080/agent/v1/vflTrainRequest/%s", url, target)
+
+		dataRequest["type"] = "vflTrainRequest"
+		logger.Sugar().Info("This is the dataRequest: ", dataRequest)
+
+		dataRequestJson, err := json.Marshal(dataRequest)
+		if err != nil {
+			logger.Sugar().Errorf("Error marshalling combined data: %v", err)
+			return []string{}, err
+		}
+
+		// TODO: Remove unnecessary data in this request
+		logger.Sugar().Infof("Sending request to %s.\nEndpoint: %s\nJSON:%v", target, endpoint, string(dataRequestJson))
+
+		go func() {
+			responseData, err := sendData(endpoint, dataRequestJson)
+
+			if err != nil {
+				logger.Sugar().Errorf("Error sending data, %v", err)
+			} else {
+				logger.Sugar().Info("responseData: ", responseData)
+
+				responseJson := &pb.MicroserviceCommunication{}
+				err = json.Unmarshal([]byte(responseData), responseJson)
+
+				if err != nil {
+					logger.Sugar().Error("Unmarshalling response did not go well: ", err)
+				}
+
+				logger.Sugar().Info("responseJson[data]: ", responseJson.Data)
+
+				dataJson := responseJson.Data.AsMap()
+				embeddings, ok := dataJson["embeddings"].(string)
+
+				if !ok {
+					logger.Sugar().Error("No embeddings found in the return data.")
+					embeddings = ""
+					// TODO: Handle disagreements?
+				}
+
+				// TODO: Make sure to order the embeddings
+				responses = append(responses, embeddings)
+			}
+
+			wg.Done()
+		}()
+	}
+
+	wg.Wait()
+
+	target := strings.ToLower(serverAuth)
+	endpoint := fmt.Sprintf("http://%s:8080/agent/v1/vflTrainRequest/%s", serverUrl, target)
+
+	logger.Sugar().Info("Responses: ", responses)
+
+	// TODO: Send proper request
+	dataRequest["type"] = "vflAggregateRequest"
+	dataRequest["data"] = map[string]any{
+		"embeddings": responses,
+	}
+
+	dataRequestJson, err := json.Marshal(dataRequest)
+	if err != nil {
+		logger.Sugar().Errorf("Error marshalling combined data: %v", err)
+		return []string{}, err
+	}
+
+	logger.Sugar().Infof("Sending request to %s.\nEndpoint: %s\nJSON:%v", target, endpoint, string(dataRequestJson))
+	responseData, error := sendData(endpoint, dataRequestJson)
+	if error != nil {
+		logger.Sugar().Errorf("Error sending data to the server, %v", error)
+	}
+
+	logger.Sugar().Info("This is the responseData: ", responseData)
+
+	// TODO: Retrieve gradients for each clients, assuming gradients are sent as strings
+	// gradients := map[string]string{}
+	responses = []string{}
+
+	// TODO: Send the gradients back to the client to update their models
+	// for auth, url := range clients {
+	// 	wg.Add(1)
+	// 	target := strings.ToLower(auth)
+	// 	// Construct the end point
+	// 	endpoint := fmt.Sprintf("http://%s:8080/agent/v1/vflTrainRequest/%s", url, target)
+	// 	gradient := gradients[target]
+	//
+	// 	// TODO: Send the respective gradient for each client
+	// 	logger.Sugar().Infof("Sending gradient descent request to %s.\nEndpoint: %s\nJSON:%v", target, endpoint, string(dataRequest))
+	//
+	// 	// Async call send the data
+	// 	go func() {
+	//    dataRequest["type"] = "vflAggregateRequest"
+	//    // JSONify dataRequest
+	// 		respData, err := sendData(endpoint, dataRequest)
+	// 		if err != nil {
+	// 			logger.Sugar().Errorf("Error sending data, %v", err)
+	//		} else {
+	//			responseJson := map[string]string{}
+	//			err = json.Unmarshal([]byte(responseData), &responseJson)
+	//
+	//			if err != nil {
+	//				logger.Sugar().Error("Unmarshalling response data did not go well: ", err)
+	//			}
+	//
+	//			responses = append(responses, responseJson)
+	//		}
+	// 		// Signal that the data request has been sent to all auth providers
+	// 		wg.Done()
+	// 	}()
+	// }
+
+	return responses, nil
+}
+
+// This runs the entire training cycle
+func runVFLTraining(dataRequest map[string]any, authorizedProviders map[string]string, jobId string) []byte {
+	clients := map[string]string{}
+	var serverUrl string
+	var serverAuth string
+	var responseData []string
+	var wg sync.WaitGroup
+
+	for auth, url := range authorizedProviders {
+		logger.Sugar().Info("AuthorizedProviders url: ", url, " auth: ", auth, " tolower Auth: ", strings.ToLower(auth))
+		if strings.ToLower(auth) == "server" {
+			serverUrl = url
+			serverAuth = auth
+		} else if url != "" {
+			clients[auth] = url
+		}
+	}
+
+	logger.Sugar().Info(clients, " and ", serverUrl, " and ", serverAuth)
+
+	for i := range 1 {
+		logger.Sugar().Info("Running VFL training round ", i)
+
+		response, err := runVFLTrainingRound(dataRequest, clients, serverAuth, serverUrl)
+		responseData = response
+
+		if err != nil {
+			logger.Sugar().Error("Training round returned an error.")
+			break
+		}
+	}
+
+	dataRequestJson, err := json.Marshal(dataRequest)
+	if err != nil {
+		logger.Sugar().Errorf("Error marshalling combined data: %v", err)
+		return []byte{}
+	}
+
+	for auth, url := range clients {
+		wg.Add(1)
+		target := strings.ToLower(auth)
+		endpoint := fmt.Sprintf("http://%s:8080/agent/v1/vflShutdownRequest/%s", url, target)
+
+		go func() {
+			sendData(endpoint, dataRequestJson)
+			wg.Done()
+		}()
+	}
+
+	wg.Wait()
+
+	response := map[string]any{
+		"jobId":     jobId,
+		"responses": responseData,
+	}
+
+	return cleanupAndMarshalResponse(response)
 }
 
 // Use the data request that was previously built and send it to the authorised providers
@@ -150,7 +339,7 @@ func sendDataToAuthProviders(dataRequest []byte, authorizedProviders map[string]
 	wg.Wait()
 	logger.Sugar().Debug("Returning responses")
 
-	responseMap := map[string]interface{}{
+	responseMap := map[string]any{
 		"jobId":     jobId,
 		"responses": responses,
 	}
@@ -161,7 +350,7 @@ func sendDataToAuthProviders(dataRequest []byte, authorizedProviders map[string]
 }
 
 // Now assumes input is map[string]interface{} and directly marshals it to prettified JSON.
-func cleanupAndMarshalResponse(responseMap map[string]interface{}) []byte {
+func cleanupAndMarshalResponse(responseMap map[string]any) []byte {
 	prettifiedJSON, err := json.MarshalIndent(responseMap, "", "    ")
 	if err != nil {
 		logger.Sugar().Errorf("Error marshalling cleaned response: %v", err)
@@ -179,9 +368,6 @@ func sendData(endpoint string, jsonData []byte) (string, error) {
 		return "", err
 	}
 
-	// Here we should send the request over the socket
-	// For now we should append it to a list so that we gather all responses and send them in bulk
-	logger.Sugar().Infof("Body: %v", body)
 	return string(body), nil
 }
 

@@ -51,7 +51,7 @@ func deployJob(ctx context.Context, msChain []mschain.MicroserviceMetadata, jobN
 	jobMutex.Unlock()
 
 	newJobName := replaceLastCharacter(jobName, newValue)
-	// Define the job
+	// TODO: Give access to a PVC?
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      newJobName,
@@ -64,10 +64,34 @@ func deployJob(ctx context.Context, msChain []mschain.MicroserviceMetadata, jobN
 			BackoffLimit:            &backoffLimit,
 			Template: v1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{"app": dataStewardName},
+					Labels: map[string]string{"app": dataStewardName, "nodeName": dataStewardName},
 				},
 				Spec: v1.PodSpec{
-					Containers:    []v1.Container{},
+					NodeName: dataStewardName,
+					Containers: []v1.Container{
+						{
+							Name:    "pvc-container",
+							Image:   "busybox",
+							Command: []string{"sleep", "600"},
+							VolumeMounts: []v1.VolumeMount{
+								{
+									Name:      "shared-storage",
+									MountPath: "/mnt/data",
+								},
+							},
+						},
+					},
+					Volumes: []v1.Volume{
+						{
+							Name: "shared-storage",
+							VolumeSource: v1.VolumeSource{
+								PersistentVolumeClaim: &v1.PersistentVolumeClaimVolumeSource{
+									ClaimName: dataStewardName + "-pvc",
+									ReadOnly:  false,
+								},
+							},
+						},
+					},
 					RestartPolicy: v1.RestartPolicyOnFailure,
 				},
 			},

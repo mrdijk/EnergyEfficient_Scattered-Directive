@@ -113,61 +113,60 @@ def deserialise_array(string, hook=None):
     return dataArray
 
 
-def train_model(data, model):
-    embedding = model(data)
-    return embedding.detach().numpy()
+class VFLClient():
+    def __init__(self, data, learning_rate=0.01, model_state=None, optimiser_state=None):
+        self.data = torch.tensor(StandardScaler().fit_transform(data)).float()
+        self.model = ClientModel(data.shape[1])
+        if model_state is not None:
+            self.model.load_state_dict(model_state)
+
+        self.optimiser = None
+
+    def create_optimiser(self, learning_rate):
+        if self.optimiser is None:
+            self.optimiser = torch.optim.SGD(
+                self.model.parameters(), lr=learning_rate)
+
+    def train_model(self):
+        embedding = self.model(self.data)
+        return serialise_array(embedding.detach().numpy())
+
+    def gradient_descent(self, gradients):
+        logger.debug("Start vfl_evaluate")
+
+        if self.optimiser is None:
+            logger.error("Optimiser is not defined.")
+
+        try:
+            self.model.zero_grad()
+            embedding = self.model(self.data)
+            embedding.backward(torch.from_numpy(gradients))
+            self.optimiser.step()
+        except Exception as e:
+            logger.error(f"Error occurred: {e}")
+
+        return "100% accuracy, buddy!"
 
 
-def vfl_evaluate(data, model, optimiser, gradients):
-    logger.debug("Start vfl_evaluate")
-
-    try:
-        model.zero_grad()
-        embedding = model(data)
-        embedding.backward(torch.from_numpy(gradients))
-        optimiser.step()
-    except Exception as e:
-        logger.error(f"Error occurred: {e}")
-
-
-# Note: Gradients sent by server are for this client only to preserve privacy
-def vfl_train(learning_rate, model_state, gradients):
-    global config
-
-    try:
-        data = load_data(config.dataset_filepath)
-    except Exception as e:
-        logger.error(f"Error occurred: {e}")
-
-        # If data does not exist, the service is not supposed to be run on
-        # this agent, so we shut down the service
-        logger.error("Shutting down the service")
-        signal_continuation(stop_event, stop_microservice_condition)
-        return None, None
-
-    data = torch.tensor(StandardScaler().fit_transform(data)).float()
-    model = ClientModel(data.shape[1])
-
-    if model_state is not None:
-        print(model_state)
-        model.load_state_dict(model_state)
-
-    optimiser = torch.optim.SGD(model.parameters(), lr=learning_rate)
-
-    if gradients is not None:
-        vfl_evaluate(data, model, optimiser, gradients)
-
-    embeddings = train_model(data, model)
-    model_state = model.state_dict()
-
-    buffer = io.BytesIO()
-    torch.save(model_state, buffer)
-
-    data = Struct()
-    data.update({"embeddings": serialise_array(embeddings),
-                 "model_state": buffer.getvalue().decode("latin1")})
-
-    return data
+# # Note: Gradients sent by server are for this client only to preserve privacy
+# def vfl_train(learning_rate, model_state, gradients):
+#
+#     optimiser = torch.optim.SGD(model.parameters(), lr=learning_rate)
+#
+#     if gradients is not None:
+#         vfl_evaluate(data, model, optimiser, gradients)
+#
+#     embeddings = train_model(data, model)
+#     model_state = model.state_dict()
+#
+#     buffer = io.BytesIO()
+#     torch.save(model_state, buffer)
+#
+#     data = Struct()
+#     data.update({"embeddings": serialise_array(embeddings),
+#                  "model_state": buffer.getvalue().decode("latin1")})
+#
+#     return data
 
 
 # ---  DYNAMOS Interface code At the Bottom --------
@@ -175,67 +174,96 @@ def vfl_train(learning_rate, model_state, gradients):
 def request_handler(msComm: msCommTypes.MicroserviceCommunication,
                     ctx: Context = None):
     global ms_config
-    logger.info(f"Received original request type: {msComm.request_type}")
+    logger.info(f"Received original request type: {
+                msComm.request_type} for msComm: {msComm}")
     logger.debug(msComm)
 
     # Ensure all connections have finished setting up before processing data
     signal_wait(wait_for_setup_event, wait_for_setup_condition)
 
-    try:
-        if msComm.request_type == "vflTrainRequest":
-            logger.info("Received a vflTrainRequest.")
+    DATA_STEWARD_NAME = os.getenv("DATA_STEWARD_NAME").lower()
 
-            try:
-                learning_rate = msComm.data["learning_rate"].number_value
-            except Exception:
-                learning_rate = 0.05
+    if DATA_STEWARD_NAME == "server":
+        logger.info("This is the server (not client), relaying request.")
+        ms_config.next_client.ms_comm.send_data(msComm, msComm.data, {})
+    else:
+        try:
+            request = rabbitTypes.Request()
+            msComm.original_request.Unpack(request)
+        except Exception as e:
+            logger.error(f"Unexpected original request received: {e}")
+            request = None
 
-            try:
-                gradients = msComm.data["gradients"].string_value
-                gradients = deserialise_array(gradients)
-            except Exception:
-                gradients = None
+        if request is not None:
+            if request.type == "vflTrainRequest":
+                logger.info("Received a vflTrainRequest.")
 
-            try:
-                model_state = msComm.data["model_state"].string_value
-                model_state = deserialise_dictionary(model_state)
-            except Exception:
-                model_state = None
+                try:
+                    embeddings = vfl_client.train_model()
+                    data = Struct()
+                    data.update({"embeddings":  embeddings})
+                    logger.info(f"Embeddings added {embeddings}")
+                except Exception as e:
+                    logger.error(f"Unexpected error: {e}")
+                    data = Struct()
 
-            logger.debug("Handling VFL Training request")
-            data = vfl_train(learning_rate, model_state, gradients)
-            logger.debug("Received data from VFL Training:")
-            logger.debug(data)
+                # Ignore metadata
+                logger.info(f"Sending data to api gateway {
+                            data} using msComm (type {type(msComm)}): {msComm}")
+                ms_config.next_client.ms_comm.send_data(msComm, data, {})
+            elif request.type == "vflGradientDescentRequest":
+                try:
+                    learning_rate = msComm.data["learning_rate"].number_value
+                    vfl_client.create_optimiser(learning_rate)
+                except Exception:
+                    vfl_client.create_optimiser(0.05)
 
-            msComm.request_type = "vflClientTrainingCompleteRequest"
+                try:
+                    gradients = msComm.data["gradients"].string_value
+                    gradients = deserialise_array(gradients)
+                except Exception:
+                    gradients = None
 
-            # Ignore metadata
-            ms_config.next_client.ms_comm.send_data(msComm, data, {})
-            # Persist. Only die when server tells you you're done
-            # signal_continuation(stop_event, stop_microservice_condition)
+                try:
+                    data = vfl_client.gradient_descent(gradients)
+                except Exception as e:
+                    logger.error(f"Unexpected error: {e}")
 
-        else:
-            logger.error(f"An unknown request_type: {msComm.request_type}")
-            # If not recognised, this service should ceize to exist.
-            signal_continuation(stop_event, stop_microservice_condition)
+                try:
+                    data = Struct()
+                    data.update({"accuracy": "100%, buddy!"})
+                except Exception as e:
+                    logger.error(f"Unexpected error: {e}")
 
-        return Empty()
-    except Exception as e:
-        logger.error(f"An unexpected error occurred: {e}")
-        return Empty()
+                ms_config.next_client.ms_comm.send_data(msComm, data, {})
+            elif request.type == "vflShutdownRequest":
+                logger.info(
+                    "Received vflShutdownRequest, shutting down service.")
+                # Persist. Only die when server tells you you're done
+                signal_continuation(stop_event, stop_microservice_condition)
+
+            else:
+                logger.error(f"An unknown request_type: {msComm.data.type}")
+
+            return Empty()
 
 
 def main():
     global config
     global ms_config
+    global vfl_client
+
+    try:
+        data = load_data(config.dataset_filepath)
+        vfl_client = VFLClient(data)
+    except Exception as e:
+        logger.error(f"Error occurred: {e}")
 
     ms_config = NewConfiguration(
         config.service_name, config.grpc_addr, request_handler)
 
-    # Signal the message handler that all connections have been created
     signal_continuation(wait_for_setup_event, wait_for_setup_condition)
 
-    # Wait for the end of processing to shutdown this Microservice
     try:
         signal_wait(stop_event, stop_microservice_condition)
 

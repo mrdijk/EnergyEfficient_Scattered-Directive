@@ -2,13 +2,10 @@ import pandas as pd
 import numpy as np
 import sys
 import os
-import io
 import json
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from collections import OrderedDict
-from sklearn.preprocessing import StandardScaler
 from google.protobuf.struct_pb2 import Struct
 from dynamos.ms_init import NewConfiguration
 from dynamos.signal_flow import signal_continuation, signal_wait
@@ -41,9 +38,7 @@ wait_for_setup_event = threading.Event()
 wait_for_setup_condition = threading.Condition()
 
 ms_config = None
-server_configuration = {}
-server_data = None
-clients_embeddings = []
+vfl_server = None
 
 # --- END DYNAMOS Interface code At the TOP ----------------------
 
@@ -77,46 +72,6 @@ def load_data(file_path):
     return data
 
 
-class ServerModel(nn.Module):
-    def __init__(self, input_size):
-        super(ServerModel, self).__init__()
-        self.fc = nn.Linear(input_size, 1)
-        self.sigmoid = nn.Sigmoid()
-
-    def forward(self, x):
-        x = self.fc(x)
-        return self.sigmoid(x)
-
-
-def server_fn(context: Context):
-    """Construct components that set the ServerApp behaviour."""
-    # get data
-    # define strategy
-    # get number of server rounds
-
-
-class ClientModel(nn.Module):
-    def __init__(self, input_size):
-        super().__init__()
-        self.fc = nn.Linear(input_size, 4)
-
-    def forward(self, x):
-        return self.fc(x)
-
-
-def serialise_dictionary(dictionary):
-    buffer = io.BytesIO()
-    torch.save(dictionary, buffer)
-
-    return buffer.getvalue().decode("latin1")
-
-
-def deserialise_dictionary(dictionary):
-    data = json.loads(dictionary, object_pairs_hook=OrderedDict)
-
-    return torch.load(io.BytesIO(data.encode("latin1")))
-
-
 def serialise_array(array):
     return json.dumps([
         str(array.dtype),
@@ -129,119 +84,109 @@ def deserialise_array(string, hook=None):
     dataType = np.dtype(encoded_data[0])
     dataArray = np.frombuffer(encoded_data[1].encode("latin1"), dataType)
 
+    logger.info(f"string: {string}, dataType: {dataType}, dataArray: {
+                dataArray}, length: {len(encoded_data)}")
+
     if len(encoded_data) > 2:
         return dataArray.reshape(encoded_data[2])
 
     return dataArray
 
 
-def aggregate_fit(results):
-    global server_configuration
+class ServerModel(nn.Module):
+    def __init__(self, input_size):
+        super(ServerModel, self).__init__()
+        self.fc = nn.Linear(input_size, 1)
+        self.sigmoid = nn.Sigmoid()
 
-    # Convert results
-    embedding_results = [
-        torch.from_numpy(embedding)
-        for embedding in results
-    ]
-    embeddings_aggregated = torch.cat(embedding_results, dim=1)
-    embedding_server = embeddings_aggregated.detach().requires_grad_()
-    output = server_configuration["model"](embedding_server)
-    loss = server_configuration["criterion"](
-        output, server_configuration["labels"])
-    loss.backward()
-
-    server_configuration["optimizer"].step()
-    server_configuration["optimizer"].zero_grad()
-
-    grads = embedding_server.grad.split([4, 4, 4], dim=1)
-    np_gradients = [grad.numpy() for grad in grads]
-
-    with torch.no_grad():
-        correct = 0
-        output = server_configuration["model"](embedding_server)
-        predicted = (output > 0.5).float()
-
-        correct += (predicted == server_configuration["labels"]).sum().item()
-
-        accuracy = correct / len(server_configuration["labels"]) * 100
-
-    metrics_aggregated = {"accuracy": accuracy}
-
-    return serialise_array(np_gradients), metrics_aggregated
+    def forward(self, x):
+        x = self.fc(x)
+        return self.sigmoid(x)
 
 
-def handleVflTrainModelRequest(msComm):
+class VFLServer():
+    def __init__(self, data):
+        self.model = ServerModel(12)
+        # self.initial_parameters = ndarrays_to_parameters(
+        #     [val.cpu().numpy()
+        #      for _, val in server_configuration.model.state_dict().items()]
+        # )
+        self.optimizer = optim.SGD(self.model.parameters(), lr=0.01)
+        self.criterion = nn.BCELoss()
+        self.labels = torch.tensor(
+            data["Survived"].values).float().unsqueeze(1)
+
+    def aggregate_fit(self, results):
+        global server_configuration
+
+        try:
+            embedding_results = [
+                torch.from_numpy(embedding.copy())
+                for embedding in results
+            ]
+        except Exception as e:
+            logger.info(f"Converting the results to torch failed: {e}")
+
+        try:
+            embeddings_aggregated = torch.cat(embedding_results, dim=1)
+            embedding_server = embeddings_aggregated.detach().requires_grad_()
+            output = self.model(embedding_server)
+            loss = self.criterion(output, self.labels)
+            loss.backward()
+
+            self.optimizer.step()
+            self.optimizer.zero_grad()
+        except Exception as e:
+            logger.info(f"Running gradient descent failed: {e}")
+
+        try:
+            grads = embedding_server.grad.split([4, 4, 4], dim=1)
+            np_gradients = [serialise_array(grad.numpy()) for grad in grads]
+        except Exception as e:
+            logger.info(f"Converting the gradients failed: {e}")
+
+        with torch.no_grad():
+            correct = 0
+            output = self.model(embedding_server)
+            predicted = (output > 0.5).float()
+
+            correct += (predicted == self.labels).sum().item()
+
+            accuracy = correct / len(self.labels) * 100
+
+        data = Struct()
+        data = data.update({"accuracy": accuracy, "gradients": np_gradients})
+
+        return data
+
+
+def handleAggregateRequest(msComm):
     global ms_config
-    global server_configuration
+    global vfl_server
 
     request = rabbitTypes.Request()
     msComm.original_request.Unpack(request)
 
     try:
-        learning_rate = request.data["learning_rate"].number_value
-    except Exception:
-        learning_rate = 0.01
-
-    server_configuration["learning_rate"] = learning_rate
-
-    try:
-        cycles = request.data["cycles"].number_value
-    except Exception:
-        cycles = 10
-
-    server_configuration["cycles"] = cycles
-
-    data = Struct()
-    data.update({
-        "learning_rate": server_configuration["learning_rate"]
-    })
-
-    msComm.request_type = "vflTrainRequest"
-    # request.data = data
-    # msComm.original_request.Pack(request)
-
-    logger.debug("Handling VFL Model Training request")
-    # TODO: Send msComm message to run a training round
-    ms_config.next_client.ms_comm.send_data(msComm, data, {})
-
-    # We do not shut off the microservice, as we want this to
-    # be a persistent microservice (or "ephemeral but long-lived")
-    # signal_continuation(stop_event, stop_microservice_condition)
-
-
-def handleVflClientTrainingCompleteRequest(msComm):
-    global ms_config
-    global server_configuration
-    global clients_embeddings
-    global clients_model_state
-
-    request = rabbitTypes.Request()
-    msComm.original_request.Unpack(request)
-
-    try:
-        data = request.data["embeddings"].string_value
-        clients_embeddings += [deserialise_array(data)]
+        data = request.data["embeddings"]
+        clients_embeddings = [deserialise_array(
+            embeddings.string_value) for embeddings in data.list_value.values]
+        logger.info(f"Embeddings: {clients_embeddings}")
     except Exception as e:
         logger.error(f"Errored when deserialising client data: {e}")
 
-    try:
-        data = request.data["model_state"].string_value
-        clients_model_state += [data]
-    except Exception as e:
-        logger.error(
-            f"Errored when deserialising client model state: {e}")
+    # TODO: Fetch model from PVC if not loaded yet
+    # try:
+    #     data = request.data["model_state"].string_value
+    #     clients_model_state += [data]
+    # except Exception as e:
+    #     logger.error(
+    #         f"Errored when deserialising client model state: {e}")
 
     # Hardcoded the number of clients for now
-    if len(clients_embeddings) == 3:
-        gradients, accuracy = aggregate_fit(clients_embeddings)
+    data = vfl_server.aggregate_fit(clients_embeddings)
 
-        server_configuration["cycles"] -= 1
-
-        if server_configuration["cycles"] == 0:
-            ms_config.next_client.ms_comm.send_data(msComm, None, {})
-
-        # TODO: Send msComm message to run a new training round
-        # With gradients this time (also give back model state)
+    ms_config.next_client.ms_comm.send_data(msComm, data, {})
 
 
 # ---  DYNAMOS Interface code At the Bottom --------
@@ -249,56 +194,46 @@ def handleVflClientTrainingCompleteRequest(msComm):
 def request_handler(msComm: msCommTypes.MicroserviceCommunication,
                     ctx: Context = None):
     global ms_config
-    global server_configuration
-    global clients_embeddings
-    global clients_model_state
-    logger.info(f"Received original request type: {msComm.request_type}")
+
+    logger.info(f"Received original request type: {
+                msComm.request_type} for msComm: {msComm}")
     logger.debug(msComm)
 
     # Ensure all connections have finished setting up before processing data
     signal_wait(wait_for_setup_event, wait_for_setup_condition)
 
-    try:
-        # This is the entry-point from the user request
-        if msComm.request_type == "vflTrainModelRequest":
-            logger.info("Received a vflTrainModelRequest.")
-            handleVflTrainModelRequest(msComm)
+    DATA_STEWARD_NAME = os.getenv("DATA_STEWARD_NAME").lower()
+    if DATA_STEWARD_NAME != "server":
+        logger.info("This is not the server, relaying the message.")
+        ms_config.next_client.ms_comm.send_data(msComm, msComm.data, {})
+    else:
+        try:
+            request = rabbitTypes.Request()
+            msComm.original_request.Unpack(request)
 
-        # Receiving data from clients -> Run aggregation if all are received
-        elif msComm.request_type == "vflClientTrainingCompleteRequest":
-            logger.info("Received a vflClientTrainingCompleteRequest.")
-            handleVflClientTrainingCompleteRequest(msComm)
+            # This is the entry-point from the user request
+            if request.type == "vflAggregateRequest":
+                logger.info("Received a vflAggregateRequest.")
+                handleAggregateRequest(msComm)
 
-        return Empty()
-    except Exception as e:
-        logger.error(f"An unexpected error occurred: {e}")
-        return Empty()
+            # Receiving data from clients -> Run aggregation if all are received
+            elif request.type == "vflShutdownRequest":
+                logger.info("Received a vflShutdownRequest.")
+                signal_continuation(stop_event, stop_microservice_condition)
+
+            return Empty()
+        except Exception as e:
+            logger.error(f"An unexpected error occurred: {e}")
+            return Empty()
 
 
 def main():
     global config
     global ms_config
-    global server_configuration
-    global server_data
+    global vfl_server
 
-    DATA_STEWARD_NAME = os.getenv("DATA_STEWARD_NAME").lower()
-
-    if DATA_STEWARD_NAME != "server":
-        logger.info("This is not the server, shutting down.")
-        sys.exit(0)
-
-    server_data = load_data(config.dataset_filepath)
-
-    server_configuration["model"] = ServerModel(12)
-    # server_configuration["initial_parameters"] = ndarrays_to_parameters(
-    #     [val.cpu().numpy()
-    #      for _, val in server_configuration.model.state_dict().items()]
-    # )
-    server_configuration["optimizer"] = optim.SGD(
-        server_configuration["model"].parameters(), lr=0.01)
-    server_configuration["criterion"] = nn.BCELoss()
-    server_configuration["labels"] = torch.tensor(
-        server_data["Survived"].values).float().unsqueeze(1)
+    data = load_data(config.dataset_filepath)
+    vfl_server = VFLServer(data)
 
     ms_config = NewConfiguration(
         config.service_name, config.grpc_addr, request_handler)

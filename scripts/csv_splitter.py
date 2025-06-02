@@ -1,26 +1,29 @@
-from google.protobuf.struct_pb2 import Struct
-import json
+import pandas as pd
+import numpy as np
+import sys
 import os
 import io
-import numpy as np
+import json
 import torch
 import torch.nn as nn
+import torch.optim as optim
+from collections import OrderedDict
 from sklearn.preprocessing import StandardScaler
-import pandas as pd
+from google.protobuf.struct_pb2 import Struct
 
 
 def filter_data(rows, columns, filter_columns):
     return [d for i, d in enumerate(rows) if columns[i] in filter_columns]
 
 
-# def _bin_age(age_series):
-#     bins = [-np.inf, 18, 60, np.inf]
-#     labels = ["Child", "Adult", "Elderly"]
-#     return (
-#         pd.cut(age_series, bins=bins, labels=labels, right=True)
-#         .astype(str)
-#         .replace("nan", "Unknown")
-#     )
+def bin_age(age_series):
+    bins = [-np.inf, 18, 60, np.inf]
+    labels = ["Child", "Adult", "Elderly"]
+    return (
+        pd.cut(age_series, bins=bins, labels=labels, right=True)
+        .astype(str)
+        .replace("nan", "Unknown")
+    )
 
 
 def _extract_title(name_series):
@@ -46,14 +49,14 @@ def _extract_title(name_series):
 def _create_features(df):
     # Convert 'Age' to numeric, coercing errors to NaN
     df["Age"] = pd.to_numeric(df["Age"], errors="coerce")
-    # df["Age"] = _bin_age(df["Age"])
+    df["Age"] = bin_age(df["Age"])
     df["Cabin"] = df["Cabin"].str[0].fillna("Unknown")
     df["Title"] = _extract_title(df["Name"])
     df.drop(columns=["PassengerId", "Name", "Ticket"], inplace=True)
     # keywords = set(df.columns)
     # print(all_keywords)
     df = pd.get_dummies(
-        df, columns=["Sex", "Pclass", "Embarked", "Title", "Cabin"]
+        df, columns=["Sex", "Pclass", "Embarked", "Title", "Cabin", "Age"]
     )
     # print(df)
     return df
@@ -132,143 +135,179 @@ for partition in configuration["partitions"]:
     #     json.dump(datasets, file)
 
 
-# data = pd.read_csv('./python/vfl-train/datasets/alphaData.csv')[1:20]
-#
-#
-# class ClientModel(nn.Module):
-#     def __init__(self, input_size):
-#         super().__init__()
-#         self.fc = nn.Linear(input_size, 4)
-#
-#     def forward(self, x):
-#         return self.fc(x)
-#
-#
-# def train_model(data, learning_rate):
-#     data = torch.tensor(StandardScaler().fit_transform(data)).float()
-#     model = ClientModel(data.shape[1])
-#     # optimiser = torch.optim.SGD(model.parameters(), lr=learning_rate)
-#
-#     embedding = model(data)
-#     return embedding.detach().numpy()
-#
-#
-# def serialise_array(array):
-#     return json.dumps([
-#         str(array.dtype),
-#         array.tobytes().decode("latin1"),
-#         array.shape])
-#
-#
-# def deserialise_array(string):
-#     encoded_data = json.loads(string)
-#     dataType = np.dtype(encoded_data[0])
-#     dataArray = np.frombuffer(encoded_data[1].encode("latin1"), dataType)
-#
-#     if len(encoded_data) > 2:
-#
-#         return dataArray.reshape(encoded_data[2])
-#     return dataArray
-#
-#
-# np.set_printoptions(threshold=sys.maxsize)
-#
-# embeddings = train_model(data, 0.05)
-# print(type(embeddings))
-# data = Struct()
-# data.update({"embeddings": serialise_array(embeddings)})
-#
-# print(embeddings.shape)
-# print(serialise_array(embeddings))
-# print(deserialise_array(serialise_array(embeddings)))
-# print(deserialise_array(serialise_array(embeddings)) == embeddings)
+data = pd.read_csv('./python/vfl-train/datasets/clientoneData.csv')[1:20]
 
 
-# class ClientModel(nn.Module):
-#     def __init__(self, input_size):
-#         super().__init__()
-#         self.fc = nn.Linear(input_size, 4)
-#
-#     def forward(self, x):
-#         return self.fc(x)
-#
-#
-# def serialise_array(array):
-#     return json.dumps([
-#         str(array.dtype),
-#         array.tobytes().decode("latin1"),
-#         array.shape])
-#
-#
-# def deserialise_array(string, hook=None):
-#     encoded_data = json.loads(string, object_pairs_hook=hook)
-#     dataType = np.dtype(encoded_data[0])
-#     dataArray = np.frombuffer(encoded_data[1].encode("latin1"), dataType)
-#
-#     if len(encoded_data) > 2:
-#         return dataArray.reshape(encoded_data[2])
-#
-#     return dataArray
-#
-#
-# def train_model(data, model):
-#     embedding = model(data)
-#     return embedding.detach().numpy()
-#
-#
-# def vfl_evaluate(data, model, optimiser, gradients):
-#     print("Start vfl_evaluate")
-#
-#     try:
-#         model.zero_grad()
-#         embedding = model(data)
-#         embedding.backward(torch.from_numpy(gradients))
-#         optimiser.step()
-#     except Exception as e:
-#         print(f"Error occurred: {e}")
-#
-#
-# # Note: Gradients sent by server are for this client only to preserve privacy
-# def vfl_train(learning_rate, model_state, gradients):
-#     global config
-#
-#     try:
-#         data = pd.read_csv('./python/vfl-train/datasets/alphaData.csv')[1:20]
-#     except Exception as e:
-#         print(f"Error occurred: {e}")
-#
-#         # If data does not exist, shut down service
-#         print("Shutting down the service")
-#         return None, None
-#
-#     data = torch.tensor(StandardScaler().fit_transform(data)).float()
-#     model = ClientModel(data.shape[1])
-#
-#     if model_state is not None:
-#         print(model_state)
-#         model.load_state_dict(torch.load(
-#             io.BytesIO(model_state.encode("latin1"))))
-#
-#     optimiser = torch.optim.SGD(model.parameters(), lr=learning_rate)
-#
-#     if gradients is not None:
-#         vfl_evaluate(data, model, optimiser, gradients)
-#
-#     embeddings = train_model(data, model)
-#     model_state = model.state_dict()
-#
-#     buffer = io.BytesIO()
-#     torch.save(model_state, buffer)
-#
-#     data = Struct()
-#     data.update({"embeddings": serialise_array(embeddings),
-#                  "model_state": buffer.getvalue().decode("latin1")})
-#
-#     return data
-#
-#
-# vfl_train(0.05, None, None)
+class ClientModel(nn.Module):
+    def __init__(self, input_size):
+        super().__init__()
+        self.fc = nn.Linear(input_size, 4)
+
+    def forward(self, x):
+        return self.fc(x)
 
 
-# data = pd.read_csv('./python/vfl-train-model/datasets/outcomeData.csv')[1:20]
-#
+def serialise_dictionary(dictionary):
+    buffer = io.BytesIO()
+    torch.save(dictionary, buffer)
+
+    return buffer.getvalue().decode("latin1")
+
+
+def deserialise_dictionary(dictionary):
+    data = json.loads(dictionary, object_pairs_hook=OrderedDict)
+
+    return torch.load(io.BytesIO(data.encode("latin1")))
+
+
+def serialise_array(array):
+    return json.dumps([
+        str(array.dtype),
+        array.tobytes().decode("latin1"),
+        array.shape])
+
+
+def deserialise_array(string, hook=None):
+    encoded_data = json.loads(string, object_pairs_hook=hook)
+    dataType = np.dtype(encoded_data[0])
+    dataArray = np.frombuffer(encoded_data[1].encode("latin1"), dataType)
+
+    if len(encoded_data) > 2:
+        return dataArray.reshape(encoded_data[2])
+
+    return dataArray
+
+
+class VFLClient():
+    def __init__(self, data, learning_rate=0.01, model_state=None, optimiser_state=None):
+        self.data = torch.tensor(StandardScaler().fit_transform(data)).float()
+        self.model = ClientModel(data.shape[1])
+        if model_state is not None:
+            self.model.load_state_dict(model_state)
+
+        self.optimiser = None
+
+    def create_optimiser(self, learning_rate):
+        if self.optimiser is None:
+            self.optimiser = torch.optim.SGD(
+                self.model.parameters(), lr=learning_rate)
+
+    def train_model(self):
+        embedding = self.model(self.data)
+        print(embedding)
+        return serialise_array(embedding.detach().numpy())
+
+    def gradient_descent(self, gradients):
+        print("Start vfl_evaluate")
+
+        if self.optimiser is None:
+            print("Optimiser is not defined.")
+
+        try:
+            self.model.zero_grad()
+            embedding = self.model(self.data)
+            embedding.backward(torch.from_numpy(gradients))
+            self.optimiser.step()
+        except Exception as e:
+            print(f"Error occurred: {e}")
+
+        return "100% accuracy, buddy!"
+
+
+np.set_printoptions(threshold=sys.maxsize)
+
+
+class ServerModel(nn.Module):
+    def __init__(self, input_size):
+        super(ServerModel, self).__init__()
+        self.fc = nn.Linear(input_size, 1)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        x = self.fc(x)
+        return self.sigmoid(x)
+
+
+class VFLServer():
+    def __init__(self, data):
+        self.model = ServerModel(12)
+        # self.initial_parameters = ndarrays_to_parameters(
+        #     [val.cpu().numpy()
+        #      for _, val in server_configuration.model.state_dict().items()]
+        # )
+        self.optimizer = optim.SGD(self.model.parameters(), lr=0.01)
+        self.criterion = nn.BCELoss()
+        self.labels = torch.tensor(
+            data["Survived"].values).float().unsqueeze(1)
+
+    def aggregate_fit(self, results):
+        global server_configuration
+
+        try:
+            embedding_results = [
+                torch.from_numpy(embedding.copy())
+                for embedding in results
+            ]
+        except Exception as e:
+            print(f"Converting the results to torch failed: {e}")
+
+        try:
+            embeddings_aggregated = torch.cat(embedding_results, dim=1)
+            embedding_server = embeddings_aggregated.detach().requires_grad_()
+            output = self.model(embedding_server)
+        except Exception as e:
+            print(f"Running gradient descent 1 failed: {e}")
+
+        try:
+            loss = self.criterion(output, self.labels)
+            loss.backward()
+        except Exception as e:
+            print(f"Running gradient descent 2 failed: {e}")
+            print(f"{output}, {self.labels}")
+
+        try:
+            self.optimizer.step()
+            self.optimizer.zero_grad()
+        except Exception as e:
+            print(f"Running gradient descent 3 failed: {e}")
+
+        try:
+            grads = embedding_server.grad.split([4, 4, 4], dim=1)
+            np_gradients = [serialise_array(grad.numpy()) for grad in grads]
+        except Exception as e:
+            print(f"Converting the gradients failed: {e}")
+
+        with torch.no_grad():
+            correct = 0
+            output = self.model(embedding_server)
+            predicted = (output > 0.5).float()
+
+            correct += (predicted == self.labels).sum().item()
+
+            accuracy = correct / len(self.labels) * 100
+
+        data = Struct()
+        data = data.update({"accuracy": accuracy, "gradients": np_gradients})
+
+        return data
+
+
+datac1 = pd.read_csv('./python/vfl-train/datasets/clientoneData.csv')[1:20]
+datac2 = pd.read_csv('./python/vfl-train/datasets/clienttwoData.csv')[1:20]
+datac3 = pd.read_csv('./python/vfl-train/datasets/clientthreeData.csv')[1:20]
+datas = pd.read_csv('./python/vfl-train-model/datasets/outcomeData.csv')[1:20]
+
+client1 = VFLClient(datac1)
+client2 = VFLClient(datac2)
+client3 = VFLClient(datac3)
+server = VFLServer(datas)
+
+embeddings = [
+    client1.train_model(),
+    client2.train_model(),
+    client3.train_model()
+]
+
+embeddings = [deserialise_array(embedding) for embedding in embeddings]
+
+server.aggregate_fit(embeddings)

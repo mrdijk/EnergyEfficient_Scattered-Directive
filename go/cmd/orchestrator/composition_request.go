@@ -76,12 +76,36 @@ func startCompositionRequest(ctx context.Context, validationResponse *pb.Validat
 		// and that this is the only possible archetype.
 		// I should probably build in that if there is no TTP online or available
 		// Or Universities have different TTPs. That these scenarios are handled as well.
-		ttp, err := chooseThirdParty(validationResponse)
-		if err != nil {
+		logger.Sugar().Info("Choosing third party for validationResponse", validationResponse)
+
+		var clients []lib.AgentDetails
+		var ttp lib.AgentDetails
+
+		if validationResponse.RequestType == "vflTrainModelRequest" {
+			receivedClients, err := getClients(validationResponse)
+			clients = receivedClients
+
+			if err != nil {
+				return nil, ctx, err
+			}
+		} else {
+			receivedTtp, err := chooseThirdParty(validationResponse)
+			ttp = receivedTtp
+
+			if err != nil {
+				return nil, ctx, err
+			}
+		}
+
+		json, err := etcd.GetAndUnmarshalJSON(etcdClient, fmt.Sprintf("/agents/online/clientone"), &ttp)
+		if err != nil || json == nil {
 			return nil, ctx, err
 		}
 
+		logger.Sugar().Info("Chosen clients", clients)
+
 		// TODO: Check if this does anything? Not doing much with dataProviders
+		logger.Sugar().Info("data providers (authorizedProviders), ", authorizedProviders)
 		// Send to each validData provider the role data provider
 		// Send to the thirdParty the role Compute provider
 		compositionRequest.Role = "dataProvider"
@@ -90,8 +114,19 @@ func startCompositionRequest(ctx context.Context, validationResponse *pb.Validat
 			logger.Sugar().Infof("Sending composition request for dataProvider %s", key)
 			tmpDataProvider = append(tmpDataProvider, key)
 			compositionRequest.DestinationQueue = authorizedProviders[key].RoutingKey
+			logger.Sugar().Info("Sending composition request ", compositionRequest)
 			c.SendCompositionRequest(ctx, compositionRequest)
 		}
+		//
+		// for _, client := range clients {
+		// 	compositionRequest.DataProviders = tmpDataProvider
+		// 	compositionRequest.Role = "computeProvider"
+		// 	compositionRequest.DestinationQueue = client.RoutingKey
+		// 	userTargets[client.Name] = client.Dns
+		//
+		// 	logger.Sugar().Info("Sending composition request for client: ", client)
+		// 	c.SendCompositionRequest(ctx, compositionRequest)
+		// }
 
 		compositionRequest.DataProviders = tmpDataProvider
 		compositionRequest.Role = "computeProvider"
@@ -126,12 +161,9 @@ func pickArchetypeBasedOnWeight() (*api.Archetype, error) {
 	for _, archeType := range archeTypes {
 		logger.Sugar().Info(archeType)
 		if archeType.Weight < lightest.Weight {
-			logger.Sugar().Info("is lightest? ", archeType, archeType.Weight < lightest.Weight)
 			lightest = archeType
 		}
 	}
-
-	logger.Sugar().Info("lightest: ", lightest)
 
 	return lightest, nil
 }
@@ -146,7 +178,7 @@ func getArchetypeBasedOnOptions(validationResponse *pb.ValidationResponse, autho
 			// If aggregate is enabled, it will select the 'dataThroughTtp' archetype, if this is allowed on all the authorizedDataProviders
 			if value {
 				allowed := true
-				for provider, _ := range authorizedDataProviders {
+				for provider := range authorizedDataProviders {
 					if !slices.Contains(validationResponse.ValidArchetypes.Archetypes[provider].Archetypes, "dataThroughTtp") {
 						logger.Sugar().Debugf("allowed false, slice: %v", validationResponse.ValidArchetypes.Archetypes[provider].Archetypes)
 
@@ -164,6 +196,10 @@ func getArchetypeBasedOnOptions(validationResponse *pb.ValidationResponse, autho
 }
 
 // TODO: Make smarter
+// If you want to make this smarter, at least first filter out disallowed archetypes, e.g.
+// archetypeList = [archetype options from all clients combined]
+// filter out archetypes that do not exist in every authorizedprovider
+// THEN do weight checking
 func chooseArchetype(validationResponse *pb.ValidationResponse, authorizedDataProviders map[string]lib.AgentDetails) (string, error) {
 	logger.Sugar().Debug("starting chooseArchetype")
 	logger.Sugar().Debug(validationResponse)
@@ -205,8 +241,41 @@ func chooseArchetype(validationResponse *pb.ValidationResponse, authorizedDataPr
 	return "", fmt.Errorf("unexpected error: could not retrieve an archetype from the intersection")
 }
 
-func chooseThirdParty(validationResponse *pb.ValidationResponse) (lib.AgentDetails, error) {
+func getClients(validationResponse *pb.ValidationResponse) ([]lib.AgentDetails, error) {
+	var clients []string
 
+	for _, provider := range validationResponse.ValidDataproviders {
+		for _, computeProvider := range provider.ComputeProviders {
+			clients = append(clients, computeProvider)
+		}
+	}
+
+	var details []lib.AgentDetails
+
+	if len(clients) == 0 {
+		return details, fmt.Errorf("No clients with compute providers found")
+	}
+
+	for _, client := range clients {
+		var agentData lib.AgentDetails
+
+		json, err := etcd.GetAndUnmarshalJSON(etcdClient, fmt.Sprintf("/agents/online/%s", client), &agentData)
+
+		if err == nil && json != nil {
+			details = append(details, agentData)
+		} else {
+			logger.Sugar().Warn("Something went wrong fetching", client)
+		}
+	}
+
+	if len(details) == 0 {
+		return details, fmt.Errorf("No clients with compute providers found")
+	}
+
+	return details, nil
+}
+
+func chooseThirdParty(validationResponse *pb.ValidationResponse) (lib.AgentDetails, error) {
 	intersectionMap := make(map[string]int)
 	totalProviders := len(validationResponse.ValidDataproviders)
 
