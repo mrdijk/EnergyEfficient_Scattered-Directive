@@ -11,6 +11,7 @@ import (
 )
 
 func handleIncomingMessages(ctx context.Context, grpcMsg *pb.SideCarMessage) error {
+	logger.Sugar().Info("Running handleIncomingMessages.")
 	ctx, span, err := lib.StartRemoteParentSpan(ctx, serviceName+"/func: handleIncomingMessages/"+grpcMsg.Type, grpcMsg.Traces)
 	if err != nil {
 		logger.Sugar().Warnf("Error starting span: %v", err)
@@ -28,7 +29,6 @@ func handleIncomingMessages(ctx context.Context, grpcMsg *pb.SideCarMessage) err
 		}
 		go compositionRequestHandler(ctx, compositionRequest)
 	case "microserviceCommunication":
-
 		handleMicroserviceCommunication(ctx, grpcMsg)
 	case "Request":
 		// handleRequestDataProvider

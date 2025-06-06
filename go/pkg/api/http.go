@@ -238,6 +238,8 @@ func PostRequest(url string, body string, extra_headers map[string]string) ([]by
 		req.Header.Add(key, value)
 	}
 
+	logger.Sugar().Info("Sending request: ", req)
+
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -247,6 +249,8 @@ func PostRequest(url string, body string, extra_headers map[string]string) ([]by
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
+	logger.Sugar().Info("Response of request: ", resp, " with the error: ", err)
+
 	if err != nil {
 		logger.Sugar().Infof("Failed to read response body: %v", err)
 		return []byte(""), err

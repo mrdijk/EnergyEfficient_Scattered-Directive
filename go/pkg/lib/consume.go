@@ -12,7 +12,8 @@ import (
 type MessageHandlerFunc func(ctx context.Context, grpcMsg *pb.SideCarMessage) error
 
 func StartConsumingWithRetry(serviceName string, c pb.RabbitMQClient, queueName string, handler MessageHandlerFunc, maxRetries int, waitTime time.Duration, receiveMutex *sync.Mutex) {
-	for i := 0; i < maxRetries; i++ {
+	logger.Sugar().Info("Starting to consume with retry (StartConsumingWithRetry)")
+	for i := range maxRetries {
 		err := startConsuming(serviceName, c, queueName, handler, receiveMutex)
 		if err == nil {
 			return
@@ -26,6 +27,7 @@ func StartConsumingWithRetry(serviceName string, c pb.RabbitMQClient, queueName 
 }
 
 func startConsuming(serviceName string, c pb.RabbitMQClient, from string, handler MessageHandlerFunc, receiveMutex *sync.Mutex) error {
+	logger.Sugar().Info("Starting to consume (startConsuming)")
 	ctx := context.Background()
 	stream, err := c.Consume(ctx, &pb.ConsumeRequest{QueueName: from, AutoAck: true})
 	if err != nil {
@@ -35,6 +37,7 @@ func startConsuming(serviceName string, c pb.RabbitMQClient, from string, handle
 	for {
 		receiveMutex.Lock()
 		grpcMsg, err := stream.Recv()
+		logger.Sugar().Info("Received grpcMessage: ", grpcMsg)
 		receiveMutex.Unlock()
 
 		logger.Sugar().Debugw("startConsuming receiving", "serviceName:", serviceName)
@@ -49,9 +52,11 @@ func startConsuming(serviceName string, c pb.RabbitMQClient, from string, handle
 		}
 
 		err = handler(ctx, grpcMsg)
+		logger.Sugar().Info("Received following error from handler: ", err)
 		if err != nil {
 			logger.Sugar().Fatalf("Failed to handle message: %v", err)
 		}
 	}
+
 	return err
 }

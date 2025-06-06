@@ -9,7 +9,7 @@ import torch.nn as nn
 import torch.optim as optim
 from collections import OrderedDict
 from sklearn.preprocessing import StandardScaler
-from google.protobuf.struct_pb2 import Struct
+from google.protobuf.struct_pb2 import Struct, ListValue, Value
 
 
 def filter_data(rows, columns, filter_columns):
@@ -287,7 +287,7 @@ class VFLServer():
             accuracy = correct / len(self.labels) * 100
 
         data = Struct()
-        data = data.update({"accuracy": accuracy, "gradients": np_gradients})
+        data.update({"accuracy": accuracy, "gradients": np_gradients})
 
         return data
 
@@ -310,4 +310,4 @@ embeddings = [
 
 embeddings = [deserialise_array(embedding) for embedding in embeddings]
 
-server.aggregate_fit(embeddings)
+print(server.aggregate_fit(embeddings))

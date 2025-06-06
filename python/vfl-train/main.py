@@ -145,8 +145,6 @@ class VFLClient():
         except Exception as e:
             logger.error(f"Error occurred: {e}")
 
-        return "100% accuracy, buddy!"
-
 
 # # Note: Gradients sent by server are for this client only to preserve privacy
 # def vfl_train(learning_rate, model_state, gradients):
@@ -225,21 +223,23 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication,
                     gradients = None
 
                 try:
-                    data = vfl_client.gradient_descent(gradients)
+                    vfl_client.gradient_descent(gradients)
                 except Exception as e:
                     logger.error(f"Unexpected error: {e}")
 
                 try:
                     data = Struct()
-                    data.update({"accuracy": "100%, buddy!"})
                 except Exception as e:
                     logger.error(f"Unexpected error: {e}")
 
                 ms_config.next_client.ms_comm.send_data(msComm, data, {})
+            elif request.type == "vflPingRequest":
+                logger.info(
+                    "Received vflPingRequest. Ping.")
+
             elif request.type == "vflShutdownRequest":
                 logger.info(
                     "Received vflShutdownRequest, shutting down service.")
-                # Persist. Only die when server tells you you're done
                 signal_continuation(stop_event, stop_microservice_condition)
 
             else:

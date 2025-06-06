@@ -1,3 +1,6 @@
+//go:build !local
+// +build !local
+
 package main
 
 import (
@@ -44,6 +47,7 @@ func isHttpWaiting(ctx context.Context, msComm *pb.MicroserviceCommunication, co
 	mutex.Lock()
 	// Look up the corresponding channel in the request map
 	dataResponseChan, ok := responseMap[correlationId]
+	logger.Sugar().Info("Response map: ", responseMap)
 	mutex.Unlock()
 
 	if ok {
@@ -52,6 +56,7 @@ func isHttpWaiting(ctx context.Context, msComm *pb.MicroserviceCommunication, co
 		// Send a signal on the channel to indicate that the response is ready
 		dataResponseChan <- dataResponse{response: msComm, localContext: ctx}
 
+		// TODO: Test if this is making things stop
 		mutex.Lock()
 		delete(responseMap, correlationId)
 		mutex.Unlock()

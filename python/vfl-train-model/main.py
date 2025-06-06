@@ -155,7 +155,7 @@ class VFLServer():
             accuracy = correct / len(self.labels) * 100
 
         data = Struct()
-        data = data.update({"accuracy": accuracy, "gradients": np_gradients})
+        data.update({"accuracy": accuracy, "gradients": np_gradients})
 
         return data
 

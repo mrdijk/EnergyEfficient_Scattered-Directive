@@ -12,6 +12,7 @@
 #     metadata:
 #       labels:
 #         app: %WORKER%
+#         type: agent
 #       annotations:
 #         "linkerd.io/inject" : enabled
 #     spec:
@@ -54,6 +55,7 @@
 # spec:
 #   selector:
 #     app: %WORKER%
+#     type: agent
 #   ports:
 #     - name: http-%WORKER%-api
 #       protocol: TCP

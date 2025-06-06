@@ -12,15 +12,21 @@ class FlowerClient(NumPyClient):
         self.data = torch.tensor(StandardScaler().fit_transform(data)).float()
         self.model = ClientModel(input_size=self.data.shape[1])
         self.optimizer = torch.optim.SGD(self.model.parameters(), lr=lr)
+        self.i = 0
+        print(self.i)
 
     def get_parameters(self, config):
         pass
 
     def fit(self, parameters, config):
+        self.i += 1
+        print("fit:", self.i)
         embedding = self.model(self.data)
         return [embedding.detach().numpy()], 1, {}
 
     def evaluate(self, parameters, config):
+        self.i += 1
+        print("eval:", self.i)
         self.model.zero_grad()
         embedding = self.model(self.data)
         embedding.backward(torch.from_numpy(parameters[int(self.v_split_id)]))

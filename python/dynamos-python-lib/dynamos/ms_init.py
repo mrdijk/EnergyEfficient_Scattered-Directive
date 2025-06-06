@@ -122,7 +122,6 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication):
 
                 # create a non-recording span with the SpanContext and set it in a Context
                 span = trace.NonRecordingSpan(sc)
-                logger.debug(f"2")
                 ctx = set_span_in_context(span)
             except Exception as e:
                 logger.error(f"A tracing error occurred: {e}")
@@ -133,6 +132,8 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication):
             except Exception as e:
                 logger.error(f"A callback error occurred: {e}")
                 return False
+
+            return True
         else:
             logger.error(f"An unexpected message arrived: {msComm.type}")
             return False
