@@ -1,3 +1,5 @@
+#!/bin/bash
+
 API_GATEWAY_POD=$(kubectl get pods -n api-gateway | grep api-gateway | sed "s/^\(api-gateway[a-zA-Z0-9-]\+\).*/\1/")
 logs=$(kubectl logs $API_GATEWAY_POD -c api-gateway -n api-gateway | sed "s/\t/ /")
 
@@ -22,4 +24,6 @@ final_accuracy=$(echo "$logs" | awk '
   }')
 
 filename="${1:-default}_intermediate_results.txt"
-echo "${intermediate_accuracies[@]}" | tr " " "\n" > "$filename"
+
+mkdir results
+echo "${intermediate_accuracies[@]}" | tr " " "\n" > "results/$filename"
