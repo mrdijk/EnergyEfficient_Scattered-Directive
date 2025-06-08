@@ -128,15 +128,18 @@ func requestHandler() http.HandlerFunc {
 // handleAll means we do all work for this request, not third part involved (computeToData archeType)
 func handleAll(ctx context.Context, jobName string, compositionRequest *pb.CompositionRequest, request *pb.Request, correlationId string) (context.Context, error) {
 	// Create msChain and deploy job.
+	// TODO: Check if chain with given job ID already exists and do not create a second one
 
 	ctx, span := trace.StartSpan(ctx, serviceName+"/func: handleAll")
 	defer span.End()
 
-	var err error
-	ctx, _, err = generateChainAndDeploy(ctx, compositionRequest, jobName, request.Options)
-	if err != nil {
-		logger.Sugar().Errorf("error deploying job: %v", err)
-		return ctx, err
+	if !jobExists(ctx, jobName) {
+		var err error
+		ctx, _, err = generateChainAndDeploy(ctx, compositionRequest, jobName, request.Options)
+		if err != nil {
+			logger.Sugar().Errorf("error deploying job: %v", err)
+			return ctx, err
+		}
 	}
 
 	msComm := &pb.MicroserviceCommunication{}

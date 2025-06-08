@@ -21,6 +21,7 @@ import (
 func requestHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		logger.Debug("Starting requestApprovalHandler")
+		// Requests may take up to 10 minutes now
 		ctxWithTimeout, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 		defer cancel()
 
@@ -101,7 +102,8 @@ func requestHandler() http.HandlerFunc {
 			var response []byte
 
 			if apiReqApproval.Type == "vflTrainModelRequest" {
-				response = runVFLTraining(dataRequestInterface, msg.AuthorizedProviders, msg.JobId)
+				ctxWithoutCancel := context.WithoutCancel(r.Context())
+				response = runVFLTraining(dataRequestInterface, msg.AuthorizedProviders, msg.JobId, ctxWithoutCancel)
 			} else {
 				// Marshal the combined data back into JSON for forwarding
 				dataRequestJson, err := json.Marshal(dataRequestInterface)
@@ -233,9 +235,6 @@ func runVFLTrainingRound(dataRequest map[string]any, clients map[string]string, 
 			return 0., err
 		}
 
-		// logger.Sugar().Info("Data request: ", dataRequest, " and json: ", string(dataRequestJson))
-		logger.Sugar().Info("Sending to endpoint ", endpoint)
-
 		go func() {
 			response, err := sendData(endpoint, dataRequestJson)
 			if err != nil {
@@ -250,26 +249,16 @@ func runVFLTrainingRound(dataRequest map[string]any, clients map[string]string, 
 	return accuracy, nil
 }
 
-func runVFLTraining(dataRequest map[string]any, authorizedProviders map[string]string, jobId string) []byte {
+func runVFLTraining(dataRequest map[string]any, authorizedProviders map[string]string, jobId string, ctx context.Context) []byte {
 	clients := map[string]string{}
 	var serverUrl string
 	var serverAuth string
 	var finalAccuracy float64
 	var wg sync.WaitGroup
 
-	// for auth, url := range authorizedProviders {
-	// 	// Get the IP of this provider, replace the URL with it.
-	// 	ips, err := net.LookupIP(url)
-	//
-	// 	if err != nil || len(ips) == 0 {
-	// 		continue
-	// 	} else {
-	// 		authorizedProviders[auth] = ips[0].String()
-	// 	}
-	// }
-
 	var cycles int64 = 10
 	var learning_rate float64 = 0.05
+	var dataProviders []string = []string{}
 
 	data, ok := dataRequest["data"].(map[string]any)
 	logger.Sugar().Info("Data from req: ", data)
@@ -288,31 +277,18 @@ func runVFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 	}
 
 	for auth, url := range authorizedProviders {
-		logger.Sugar().Info("AuthorizedProviders url: ", url, " auth: ", auth, " tolower Auth: ", strings.ToLower(auth))
 		if strings.ToLower(auth) == "server" {
 			serverUrl = url
 			serverAuth = auth
 		} else if url != "" {
 			clients[auth] = url
 		}
+
+		dataProviders = append(dataProviders, auth)
 	}
 
-	logger.Sugar().Info(clients, " and ", serverUrl, " and ", serverAuth)
-
-	logger.Sugar().Info("Running VFL for ", cycles, " rounds")
-	for i := range 1 {
-		logger.Sugar().Info("Running VFL training round ", i)
-
-		accuracy, err := runVFLTrainingRound(dataRequest, clients, serverAuth, serverUrl, learning_rate)
-		finalAccuracy = accuracy
-
-		if err != nil {
-			logger.Sugar().Error("Training round returned an error.")
-			break
-		}
-	}
-
-	dataRequest["request"] = "vflShutdownRequest"
+	logger.Sugar().Info("Sending ping to start pods...")
+	dataRequest["type"] = "vflPingRequest"
 
 	dataRequestJson, err := json.Marshal(dataRequest)
 	if err != nil {
@@ -320,7 +296,115 @@ func runVFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 		return []byte{}
 	}
 
-	for auth, url := range clients {
+	user, ok := dataRequest["user"].(*pb.User)
+
+	if !ok {
+		logger.Sugar().Info("Did not retrieve User from dataRequest, cannot dynamically verify each training round.")
+		user = &pb.User{}
+	}
+
+	var noPing bool = false
+
+	for auth, url := range authorizedProviders {
+		wg.Add(1)
+		target := strings.ToLower(auth)
+		endpoint := fmt.Sprintf("http://%s:8080/agent/v1/vflTrainRequest/%s", url, target)
+
+		go func() {
+			// TODO: Repeat ping until no error, after 5 tries, cancel request
+			for i := range 5 {
+				_, err := sendData(endpoint, dataRequestJson)
+
+				if err == nil {
+					break
+				}
+
+				if i == 4 {
+					noPing = true
+				}
+			}
+
+			wg.Done()
+		}()
+	}
+
+	if noPing {
+		logger.Sugar().Error("No ping from a client or the server. Something is wrong.")
+	}
+
+	wg.Wait()
+
+	logger.Sugar().Info("Running VFL for ", cycles, " rounds")
+	for round := range cycles {
+		logger.Sugar().Info("Running VFL training round ", round)
+
+		protoRequest := &pb.RequestApproval{
+			Type:             "vflTrainModelRequest",
+			User:             user,
+			DataProviders:    dataProviders,
+			DestinationQueue: "policyEnforcer-in",
+		}
+
+		// Create a channel to receive the response
+		responseChan := make(chan validation)
+
+		requestApprovalMutex.Lock()
+		requestApprovalMap[protoRequest.User.Id] = responseChan
+		requestApprovalMutex.Unlock()
+
+		noValidation := false
+
+		logger.Sugar().Info("- Sending policy reverification request")
+		for i := range 5 {
+			_, err = c.SendRequestApproval(ctx, protoRequest)
+			if err != nil {
+				logger.Sugar().Warnf("error in sending/receiving requestApproval: %v", err)
+			}
+
+			if err == nil {
+				break
+			}
+
+			if i == 4 {
+				noValidation = true
+			}
+		}
+
+		if noValidation {
+			logger.Sugar().Error("No reverification approval received, error in network. Shutting down operation.")
+			break
+		}
+
+		select {
+		case validationStruct := <-responseChan:
+			msg := validationStruct.response
+
+			if msg.Type != "requestApprovalResponse" {
+				logger.Sugar().Errorf("Unexpected message received, type: %s", msg.Type)
+				return []byte{}
+			}
+
+			logger.Sugar().Info("- Sending training request")
+			accuracy, err := runVFLTrainingRound(dataRequest, clients, serverAuth, serverUrl, learning_rate)
+			logger.Sugar().Info("- Intermediate accuracy achieved: ", accuracy, " for round ", round)
+			finalAccuracy = accuracy
+
+			if err != nil {
+				logger.Sugar().Error("Training round returned an error.")
+				break
+			}
+		}
+	}
+
+	dataRequest["type"] = "vflShutdownRequest"
+
+	dataRequestJson, err = json.Marshal(dataRequest)
+	if err != nil {
+		logger.Sugar().Errorf("Error marshalling combined data: %v", err)
+		return []byte{}
+	}
+
+	for auth, url := range authorizedProviders {
 		wg.Add(1)
 		target := strings.ToLower(auth)
 		endpoint := fmt.Sprintf("http://%s:8080/agent/v1/vflTrainRequest/%s", url, target)
@@ -337,6 +421,10 @@ func runVFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 		"jobId":    jobId,
 		"accuracy": finalAccuracy,
 	}
+
+	logger.Sugar().Info("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
+	logger.Sugar().Info("Final accuracy achieved: ", finalAccuracy)
+	logger.Sugar().Info("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
 
 	return cleanupAndMarshalResponse(response)
 }

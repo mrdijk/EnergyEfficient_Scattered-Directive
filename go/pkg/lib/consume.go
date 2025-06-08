@@ -37,10 +37,9 @@ func startConsuming(serviceName string, c pb.RabbitMQClient, from string, handle
 	for {
 		receiveMutex.Lock()
 		grpcMsg, err := stream.Recv()
-		logger.Sugar().Info("Received grpcMessage: ", grpcMsg)
 		receiveMutex.Unlock()
 
-		logger.Sugar().Debugw("startConsuming receiving", "serviceName:", serviceName)
+		// logger.Sugar().Debugw("startConsuming receiving", "serviceName:", serviceName)
 		if err == io.EOF {
 			// The stream has ended.
 			logger.Sugar().Warnw("Stream has ended", "error:", err)
@@ -52,7 +51,6 @@ func startConsuming(serviceName string, c pb.RabbitMQClient, from string, handle
 		}
 
 		err = handler(ctx, grpcMsg)
-		logger.Sugar().Info("Received following error from handler: ", err)
 		if err != nil {
 			logger.Sugar().Fatalf("Failed to handle message: %v", err)
 		}

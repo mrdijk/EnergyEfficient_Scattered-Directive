@@ -84,9 +84,6 @@ def deserialise_array(string, hook=None):
     dataType = np.dtype(encoded_data[0])
     dataArray = np.frombuffer(encoded_data[1].encode("latin1"), dataType)
 
-    logger.info(f"string: {string}, dataType: {dataType}, dataArray: {
-                dataArray}, length: {len(encoded_data)}")
-
     if len(encoded_data) > 2:
         return dataArray.reshape(encoded_data[2])
 
@@ -157,6 +154,8 @@ class VFLServer():
         data = Struct()
         data.update({"accuracy": accuracy, "gradients": np_gradients})
 
+        logger.info(f"Accuracy achieved: {accuracy}")
+
         return data
 
 
@@ -171,7 +170,6 @@ def handleAggregateRequest(msComm):
         data = request.data["embeddings"]
         clients_embeddings = [deserialise_array(
             embeddings.string_value) for embeddings in data.list_value.values]
-        logger.info(f"Embeddings: {clients_embeddings}")
     except Exception as e:
         logger.error(f"Errored when deserialising client data: {e}")
 
@@ -195,36 +193,45 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication,
                     ctx: Context = None):
     global ms_config
 
-    logger.info(f"Received original request type: {
-                msComm.request_type} for msComm: {msComm}")
-    logger.debug(msComm)
+    logger.info(f"Received original request type: {msComm.request_type}")
 
     # Ensure all connections have finished setting up before processing data
     signal_wait(wait_for_setup_event, wait_for_setup_condition)
 
-    DATA_STEWARD_NAME = os.getenv("DATA_STEWARD_NAME").lower()
-    if DATA_STEWARD_NAME != "server":
-        logger.info("This is not the server, relaying the message.")
+    try:
+        request = rabbitTypes.Request()
+        msComm.original_request.Unpack(request)
+    except Exception as e:
+        logger.error(f"Unexpected original request received: {e}")
         ms_config.next_client.ms_comm.send_data(msComm, msComm.data, {})
+        return Empty()
+
+    DATA_STEWARD_NAME = os.getenv("DATA_STEWARD_NAME").lower()
+
+    if DATA_STEWARD_NAME != "server":
+        if request.type == "vflShutdownRequest":
+            logger.info(
+                "Received vflShutdownRequest, shutting down service.")
+            ms_config.next_client.ms_comm.send_data(msComm, msComm.data, {})
+            signal_continuation(stop_event, stop_microservice_condition)
+        else:
+            logger.info("This is the server (not client), relaying request.")
+            ms_config.next_client.ms_comm.send_data(msComm, msComm.data, {})
+
     else:
-        try:
-            request = rabbitTypes.Request()
-            msComm.original_request.Unpack(request)
+        if request.type == "vflAggregateRequest":
+            logger.info("Received a vflAggregateRequest.")
+            handleAggregateRequest(msComm)
 
-            # This is the entry-point from the user request
-            if request.type == "vflAggregateRequest":
-                logger.info("Received a vflAggregateRequest.")
-                handleAggregateRequest(msComm)
+        elif request.type == "vflPingRequest":
+            logger.info("Received a vflPingRequest.")
+            ms_config.next_client.ms_comm.send_data(msComm, msComm.data, {})
 
-            # Receiving data from clients -> Run aggregation if all are received
-            elif request.type == "vflShutdownRequest":
-                logger.info("Received a vflShutdownRequest.")
-                signal_continuation(stop_event, stop_microservice_condition)
+        elif request.type == "vflShutdownRequest":
+            logger.info("Received a vflShutdownRequest.")
+            signal_continuation(stop_event, stop_microservice_condition)
 
-            return Empty()
-        except Exception as e:
-            logger.error(f"An unexpected error occurred: {e}")
-            return Empty()
+        return Empty()
 
 
 def main():

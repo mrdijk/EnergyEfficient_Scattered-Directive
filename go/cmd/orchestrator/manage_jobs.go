@@ -318,7 +318,7 @@ func getJobAcrossAgents(ctx context.Context, targetMap map[string]*pb.Compositio
 	return ctx
 }
 
-func handleRequestApproval(ctx context.Context, validationResponse *pb.ValidationResponse) {
+func handleRequestApproval(ctx context.Context, validationResponse *pb.ValidationResponse, redeploy bool) {
 	result := &pb.RequestApprovalResponse{Type: "requestApprovalResponse", RequestMetadata: &pb.RequestMetadata{DestinationQueue: "api-gateway-in"}}
 
 	authorizedProviders, err := getAuthorizedProviders(validationResponse)
@@ -341,7 +341,7 @@ func handleRequestApproval(ctx context.Context, validationResponse *pb.Validatio
 
 	compositionRequest := &pb.CompositionRequest{}
 	compositionRequest.User = &pb.User{}
-	userTargets, ctx, err := startCompositionRequest(ctx, validationResponse, authorizedProviders, compositionRequest)
+	userTargets, ctx, err := startCompositionRequest(ctx, validationResponse, authorizedProviders, compositionRequest, redeploy)
 	if err != nil {
 		switch e := err.(type) {
 		case *UnauthorizedProviderError:

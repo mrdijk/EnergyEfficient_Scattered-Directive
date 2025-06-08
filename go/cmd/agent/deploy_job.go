@@ -16,6 +16,29 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+func jobExists(ctx context.Context, jobName string) bool {
+	// Check if job exists, if it does, do not make a new one
+	dataStewardName := strings.ToLower(serviceName)
+	if dataStewardName == "" {
+		return false
+	}
+
+	jobMutex.Lock()
+	newValue := jobCounter[jobName]
+	jobMutex.Unlock()
+
+	newJobName := replaceLastCharacter(jobName, newValue)
+
+	logger.Sugar().Info("Steward: ", dataStewardName, ", job name: ", newJobName)
+	logger.Sugar().Info(clientSet.BatchV1().Jobs(dataStewardName))
+	_, err := clientSet.BatchV1().Jobs(dataStewardName).Get(ctx, newJobName, metav1.GetOptions{})
+	if err != nil {
+		return false
+	}
+
+	return true
+}
+
 func generateChainAndDeploy(ctx context.Context, compositionRequest *pb.CompositionRequest, localJobName string, options map[string]bool) (context.Context, *batchv1.Job, error) {
 	logger.Debug("Starting generateChainAndDeploy")
 

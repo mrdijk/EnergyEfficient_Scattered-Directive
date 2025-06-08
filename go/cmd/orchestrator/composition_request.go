@@ -20,7 +20,7 @@ func (e *UnauthorizedProviderError) Error() string {
 	return fmt.Sprintf("third party '%s' is not online", e.ProviderName)
 }
 
-func startCompositionRequest(ctx context.Context, validationResponse *pb.ValidationResponse, authorizedProviders map[string]lib.AgentDetails, compositionRequest *pb.CompositionRequest) (map[string]string, context.Context, error) {
+func startCompositionRequest(ctx context.Context, validationResponse *pb.ValidationResponse, authorizedProviders map[string]lib.AgentDetails, compositionRequest *pb.CompositionRequest, redeploy bool) (map[string]string, context.Context, error) {
 	logger.Debug("Entering startCompositionRequest")
 
 	ctx, span := trace.StartSpan(ctx, "startCompositionRequest")
@@ -68,7 +68,9 @@ func startCompositionRequest(ctx context.Context, validationResponse *pb.Validat
 		for key := range authorizedProviders {
 			logger.Sugar().Infof("Sending composition request for dataProvider %s", key)
 			compositionRequest.DestinationQueue = authorizedProviders[key].RoutingKey
-			c.SendCompositionRequest(ctx, compositionRequest)
+			if !redeploy {
+				c.SendCompositionRequest(ctx, compositionRequest)
+			}
 			userTargets[key] = authorizedProviders[key].Dns
 		}
 	} else {
@@ -114,19 +116,11 @@ func startCompositionRequest(ctx context.Context, validationResponse *pb.Validat
 			logger.Sugar().Infof("Sending composition request for dataProvider %s", key)
 			tmpDataProvider = append(tmpDataProvider, key)
 			compositionRequest.DestinationQueue = authorizedProviders[key].RoutingKey
-			logger.Sugar().Info("Sending composition request ", compositionRequest)
-			c.SendCompositionRequest(ctx, compositionRequest)
+			if !redeploy {
+				logger.Sugar().Info("Sending composition request ", compositionRequest)
+				c.SendCompositionRequest(ctx, compositionRequest)
+			}
 		}
-		//
-		// for _, client := range clients {
-		// 	compositionRequest.DataProviders = tmpDataProvider
-		// 	compositionRequest.Role = "computeProvider"
-		// 	compositionRequest.DestinationQueue = client.RoutingKey
-		// 	userTargets[client.Name] = client.Dns
-		//
-		// 	logger.Sugar().Info("Sending composition request for client: ", client)
-		// 	c.SendCompositionRequest(ctx, compositionRequest)
-		// }
 
 		compositionRequest.DataProviders = tmpDataProvider
 		compositionRequest.Role = "computeProvider"
@@ -134,7 +128,10 @@ func startCompositionRequest(ctx context.Context, validationResponse *pb.Validat
 		userTargets[ttp.Name] = ttp.Dns
 
 		logger.Sugar().Info("Sending composition request for computeProvider")
-		c.SendCompositionRequest(ctx, compositionRequest)
+
+		if !redeploy {
+			c.SendCompositionRequest(ctx, compositionRequest)
+		}
 	}
 	return userTargets, ctx, nil
 }

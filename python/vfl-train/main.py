@@ -65,7 +65,6 @@ def load_data(file_path):
 
     try:
         data = pd.read_csv(file_name, delimiter=',')
-        logger.debug("after read csv")
     except FileNotFoundError:
         logger.error(f"CSV file for table {file_name} not found.")
         return None
@@ -104,6 +103,7 @@ def serialise_array(array):
 
 def deserialise_array(string, hook=None):
     encoded_data = json.loads(string, object_pairs_hook=hook)
+    logger.info(string, encoded_data)
     dataType = np.dtype(encoded_data[0])
     dataArray = np.frombuffer(encoded_data[1].encode("latin1"), dataType)
 
@@ -132,8 +132,6 @@ class VFLClient():
         return serialise_array(embedding.detach().numpy())
 
     def gradient_descent(self, gradients):
-        logger.debug("Start vfl_evaluate")
-
         if self.optimiser is None:
             logger.error("Optimiser is not defined.")
 
@@ -172,26 +170,31 @@ class VFLClient():
 def request_handler(msComm: msCommTypes.MicroserviceCommunication,
                     ctx: Context = None):
     global ms_config
-    logger.info(f"Received original request type: {
-                msComm.request_type} for msComm: {msComm}")
-    logger.debug(msComm)
+    logger.info(f"Received original request type: {msComm.request_type}")
 
     # Ensure all connections have finished setting up before processing data
     signal_wait(wait_for_setup_event, wait_for_setup_condition)
 
+    try:
+        request = rabbitTypes.Request()
+        msComm.original_request.Unpack(request)
+    except Exception as e:
+        logger.error(f"Unexpected original request received: {e}")
+        ms_config.next_client.ms_comm.send_data(msComm, msComm.data, {})
+        return Empty()
+
     DATA_STEWARD_NAME = os.getenv("DATA_STEWARD_NAME").lower()
 
     if DATA_STEWARD_NAME == "server":
-        logger.info("This is the server (not client), relaying request.")
-        ms_config.next_client.ms_comm.send_data(msComm, msComm.data, {})
+        if request.type == "vflShutdownRequest":
+            logger.info(
+                "Received vflShutdownRequest, shutting down service.")
+            ms_config.next_client.ms_comm.send_data(msComm, msComm.data, {})
+            signal_continuation(stop_event, stop_microservice_condition)
+        else:
+            logger.info("This is the server (not client), relaying request.")
+            ms_config.next_client.ms_comm.send_data(msComm, msComm.data, {})
     else:
-        try:
-            request = rabbitTypes.Request()
-            msComm.original_request.Unpack(request)
-        except Exception as e:
-            logger.error(f"Unexpected original request received: {e}")
-            request = None
-
         if request is not None:
             if request.type == "vflTrainRequest":
                 logger.info("Received a vflTrainRequest.")
@@ -200,26 +203,24 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication,
                     embeddings = vfl_client.train_model()
                     data = Struct()
                     data.update({"embeddings":  embeddings})
-                    logger.info(f"Embeddings added {embeddings}")
                 except Exception as e:
                     logger.error(f"Unexpected error: {e}")
                     data = Struct()
 
-                # Ignore metadata
-                logger.info(f"Sending data to api gateway {
-                            data} using msComm (type {type(msComm)}): {msComm}")
                 ms_config.next_client.ms_comm.send_data(msComm, data, {})
             elif request.type == "vflGradientDescentRequest":
                 try:
-                    learning_rate = msComm.data["learning_rate"].number_value
+                    learning_rate = request.data["learning_rate"].number_value
                     vfl_client.create_optimiser(learning_rate)
                 except Exception:
                     vfl_client.create_optimiser(0.05)
 
                 try:
-                    gradients = msComm.data["gradients"].string_value
+                    gradients = request.data["gradients"].string_value
                     gradients = deserialise_array(gradients)
-                except Exception:
+                except Exception as e:
+                    logger.error(f"Gradients did not get parsed properly: {e}")
+                    logger.info(msComm.data)
                     gradients = None
 
                 try:
@@ -233,14 +234,16 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication,
                     logger.error(f"Unexpected error: {e}")
 
                 ms_config.next_client.ms_comm.send_data(msComm, data, {})
-            elif request.type == "vflPingRequest":
-                logger.info(
-                    "Received vflPingRequest. Ping.")
 
             elif request.type == "vflShutdownRequest":
                 logger.info(
                     "Received vflShutdownRequest, shutting down service.")
                 signal_continuation(stop_event, stop_microservice_condition)
+
+            elif request.type == "vflPingRequest":
+                logger.info("Received a vflPingRequest.")
+                ms_config.next_client.ms_comm.send_data(
+                    msComm, msComm.data, {})
 
             else:
                 logger.error(f"An unknown request_type: {msComm.data.type}")
