@@ -34,7 +34,7 @@ for number in 5 10 25 50 100; do
         }
 
         # Wait until training is done
-        sleep $number * 12
+        sleep $((number * 12))
 
         ./scripts/retrieve_data.sh "$number-$i"
 
