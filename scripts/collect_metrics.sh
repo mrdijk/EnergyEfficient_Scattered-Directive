@@ -11,24 +11,27 @@ for number in 5 10 25 50 100; do
         sleep 15
 
         echo "Running for $number rounds for the ${i}th time."
-        curl -H "Host: api-gateway.api-gateway.svc.cluster.local" http://$DYNAMOS_IP:$DYNAMOS_PORT/api/v1/requestApproval \
-        --header 'Content-Type: application/json' \
-        --data-raw "{
-            \"type\": \"vflTrainModelRequest\",
-            \"user\": {
-                \"id\": \"1234\",
-                \"userName\": \"jake.jongejans@student.uva.nl\"
-            },
-            \"dataProviders\": [\"server\", \"clientone\", \"clienttwo\", \"clientthree\"],
-            \"data_request\": {
+
+        {
+            curl -H "Host: api-gateway.api-gateway.svc.cluster.local" http://$DYNAMOS_IP:$DYNAMOS_PORT/api/v1/requestApproval \
+            --header 'Content-Type: application/json' \
+            --data-raw "{
                 \"type\": \"vflTrainModelRequest\",
-                \"data\": {
-                  \"learning_rate\": 0.05,
-                  \"cycles\": $number
+                \"user\": {
+                    \"id\": \"1234\",
+                    \"userName\": \"jake.jongejans@student.uva.nl\"
                 },
-        \"requestMetadata\": {}
-            }
-        }"
+                \"dataProviders\": [\"server\", \"clientone\", \"clienttwo\", \"clientthree\"],
+                \"data_request\": {
+                    \"type\": \"vflTrainModelRequest\",
+                    \"data\": {
+                      \"learning_rate\": 0.05,
+                      \"cycles\": $number
+                    },
+            \"requestMetadata\": {}
+                }
+            }"
+        }
 
         # Wait until training is done
         sleep $number * 12
