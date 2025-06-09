@@ -4,13 +4,14 @@ DYNAMOS_PORT=$(kubectl get svc -n ingress | grep "nginx-nginx-ingress-controller
 DYNAMOS_IP=$(kubectl get nodes -o wide | grep dynamos | sed "s/.*\s\([0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\).*/\1/")
 
 for number in 5 10 25 50 100; do
+    echo "Running rounds with $number cycles"
     for ((i=1; i<6; i++)); do
-        ./configuration/dynamos-configuration.sh
+        ./configuration/dynamos-configuration.sh > /dev/null
 
         # Sleep so the API gateway actually gets a message.
         sleep 15
 
-        echo "Running for $number rounds for the ${i}th time."
+        echo "- Running for $number rounds for the ${i}th time."
 
         {
             curl -H "Host: api-gateway.api-gateway.svc.cluster.local" http://$DYNAMOS_IP:$DYNAMOS_PORT/api/v1/requestApproval \
@@ -30,18 +31,21 @@ for number in 5 10 25 50 100; do
                     },
             \"requestMetadata\": {}
                 }
-            }"
+            }" > /dev/null
         }
 
-        # Wait until training is done
+        echo "- Curl timeout, waiting $((number * 12)) seconds..."
         sleep $((number * 12))
 
+        echo "- Exporting the results..."
         ./scripts/retrieve_data.sh "$number-$i"
 
         sleep 5
 
-        helm uninstall agents api-gateway core orchestrator namespaces prometheus thirdparties
+        echo "- Uninstalling DYNAMOS for clean slate next round..."
+        helm uninstall agents api-gateway core orchestrator namespaces prometheus thirdparties > /dev/null
 
+        echo "- Waiting on final terminations for 30 seconds..."
         sleep 30
     done
 done

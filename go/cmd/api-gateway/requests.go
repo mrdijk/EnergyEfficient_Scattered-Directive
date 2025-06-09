@@ -396,6 +396,10 @@ func runVFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 		}
 	}
 
+	logger.Sugar().Info("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
+	logger.Sugar().Info("Final accuracy achieved: ", finalAccuracy)
+	logger.Sugar().Info("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
+
 	dataRequest["type"] = "vflShutdownRequest"
 
 	dataRequestJson, err = json.Marshal(dataRequest)
