@@ -3,9 +3,29 @@
 DYNAMOS_PORT=$(kubectl get svc -n ingress | grep "nginx-nginx-ingress-controller" | sed "s/.*80:\([0-9]*\)\/TCP.*/\1/")
 DYNAMOS_IP=$(kubectl get nodes -o wide | grep dynamos | sed "s/.*\s\([0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\).*/\1/")
 
-for number in 5 10 25 50 100; do
+for number in "10-4" "1000-2" "1000-4" "250-4" "500-3"; do
     echo "Running rounds with $number cycles"
     for ((i=1; i<6; i++)); do
+        if [ "$number" = "10-4" ]; then
+          number = 10
+          i = 4
+        fi
+        if [ "$number" = "1000-2" ]; then
+          number = 1000
+          i = 2
+        fi
+        if [ "$number" = "1000-4" ]; then
+          number = 1000
+          i = 4
+        fi
+        if [ "$number" = "250-4" ]; then
+          number = 250
+          i = 4
+        fi
+        if [ "$number" = "500-3" ]; then
+          number = 500
+          i = 3
+        fi
         ./configuration/dynamos-configuration.sh > /dev/null
 
         # Sleep so the API gateway actually gets a message.
@@ -27,7 +47,8 @@ for number in 5 10 25 50 100; do
                     \"type\": \"vflTrainModelRequest\",
                     \"data\": {
                       \"learning_rate\": 0.05,
-                      \"cycles\": $number
+                      \"cycles\": 20
+                      \"change_policies\": 10
                     },
             \"requestMetadata\": {}
                 }

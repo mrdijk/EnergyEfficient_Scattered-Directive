@@ -258,6 +258,7 @@ func runVFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 
 	var cycles int64 = 10
 	var learning_rate float64 = 0.05
+	var change_policies int64 = -1
 	var dataProviders []string = []string{}
 
 	data, ok := dataRequest["data"].(map[string]any)
@@ -273,6 +274,11 @@ func runVFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 		floatLearningRate, ok := data["learning_rate"].(float64)
 		if ok {
 			learning_rate = floatLearningRate
+		}
+
+		changePolicies, ok := data["change_policies"].(float64)
+		if ok {
+			change_policies = int64(changePolicies)
 		}
 	}
 
@@ -338,6 +344,31 @@ func runVFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 	for round := range cycles {
 		logger.Sugar().Info("Running VFL training round ", round)
 
+		// TODO: Implement policy change request
+		if change_policies == round {
+			logger.Sugar().Info("Sending in the policy change request, removing client 3 from the agreement.")
+			logger.Sugar().Info("TODO: Policy change request not yet implemented.")
+
+			policyUpdate := &pb.RequestApproval{
+				Type:             "policyRemoval",
+				User:             user,
+				DestinationQueue: "policyEnforcer-in",
+			}
+
+			// Create a channel to receive the response
+			responseChan := make(chan validation)
+
+			requestApprovalMutex.Lock()
+			requestApprovalMap[policyUpdate.User.Id] = responseChan
+			requestApprovalMutex.Unlock()
+
+			logger.Sugar().Info("- Sending policy removal request")
+			_, err = c.SendRequestApproval(ctx, policyUpdate)
+			if err != nil {
+				logger.Sugar().Warnf("error in sending/receiving policy removal: %v", err)
+			}
+		}
+
 		protoRequest := &pb.RequestApproval{
 			Type:             "vflTrainModelRequest",
 			User:             user,
@@ -378,10 +409,18 @@ func runVFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 		select {
 		case validationStruct := <-responseChan:
 			msg := validationStruct.response
+			logger.Sugar().Info("Received validation message: ", msg, ", with vstruct: ", validationStruct)
 
 			if msg.Type != "requestApprovalResponse" {
 				logger.Sugar().Errorf("Unexpected message received, type: %s", msg.Type)
 				return []byte{}
+			}
+
+			if msg.Error != "" || len(msg.AuthorizedProviders) != len(authorizedProviders) {
+				logger.Sugar().Info("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
+				logger.Sugar().Info("   Policy does not allow this training to continue.")
+				logger.Sugar().Info("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
+				break
 			}
 
 			logger.Sugar().Info("- Sending training request")
@@ -393,6 +432,7 @@ func runVFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 				logger.Sugar().Error("Training round returned an error.")
 				break
 			}
+			// default:
 		}
 	}
 

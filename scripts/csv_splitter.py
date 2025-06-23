@@ -194,7 +194,6 @@ class VFLClient():
 
     def train_model(self):
         embedding = self.model(self.data)
-        print(embedding)
         return serialise_array(embedding.detach().numpy())
 
     def gradient_descent(self, gradients):
@@ -308,6 +307,6 @@ embeddings = [
     client3.train_model()
 ]
 
-embeddings = [deserialise_array(embedding) for embedding in embeddings]
-
-print(server.aggregate_fit(embeddings))
+# embeddings = [deserialise_array(embedding) for embedding in embeddings]
+#
+# print(server.aggregate_fit(embeddings))

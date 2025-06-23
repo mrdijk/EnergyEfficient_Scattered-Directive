@@ -81,19 +81,6 @@ class ClientModel(nn.Module):
         return self.fc(x)
 
 
-def serialise_dictionary(dictionary):
-    buffer = io.BytesIO()
-    torch.save(dictionary, buffer)
-
-    return buffer.getvalue().decode("latin1")
-
-
-def deserialise_dictionary(dictionary):
-    data = json.loads(dictionary, object_pairs_hook=OrderedDict)
-
-    return torch.load(io.BytesIO(data.encode("latin1")))
-
-
 def serialise_array(array):
     return json.dumps([
         str(array.dtype),
@@ -128,8 +115,8 @@ class VFLClient():
                 self.model.parameters(), lr=learning_rate)
 
     def train_model(self):
-        embedding = self.model(self.data)
-        return serialise_array(embedding.detach().numpy())
+        self.embedding = self.model(self.data)
+        return serialise_array(self.embedding.detach().numpy())
 
     def gradient_descent(self, gradients):
         if self.optimiser is None:
@@ -137,8 +124,8 @@ class VFLClient():
 
         try:
             self.model.zero_grad()
-            embedding = self.model(self.data)
-            embedding.backward(torch.from_numpy(gradients))
+            # embedding = self.model(self.data)
+            self.embedding.backward(torch.from_numpy(gradients))
             self.optimiser.step()
         except Exception as e:
             logger.error(f"Error occurred: {e}")
