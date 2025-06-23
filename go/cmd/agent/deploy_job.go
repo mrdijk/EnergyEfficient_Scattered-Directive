@@ -32,11 +32,8 @@ func jobExists(ctx context.Context, jobName string) bool {
 	logger.Sugar().Info("Steward: ", dataStewardName, ", job name: ", newJobName)
 	logger.Sugar().Info(clientSet.BatchV1().Jobs(dataStewardName))
 	_, err := clientSet.BatchV1().Jobs(dataStewardName).Get(ctx, newJobName, metav1.GetOptions{})
-	if err != nil {
-		return false
-	}
 
-	return true
+	return err == nil
 }
 
 func generateChainAndDeploy(ctx context.Context, compositionRequest *pb.CompositionRequest, localJobName string, options map[string]bool) (context.Context, *batchv1.Job, error) {
