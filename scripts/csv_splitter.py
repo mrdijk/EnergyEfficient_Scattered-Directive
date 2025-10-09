@@ -51,12 +51,12 @@ def _create_features(df):
     df["Age"] = pd.to_numeric(df["Age"], errors="coerce")
     df["Age"] = bin_age(df["Age"])
     df["Cabin"] = df["Cabin"].str[0].fillna("Unknown")
-    df["Title"] = _extract_title(df["Name"])
-    df.drop(columns=["PassengerId", "Name", "Ticket"], inplace=True)
+    # df["Title"] = _extract_title(df["Name"])
+    df.drop(columns=["PassengerId", "Name", "Ticket", "Title"], inplace=True)
     # keywords = set(df.columns)
     # print(all_keywords)
     df = pd.get_dummies(
-        df, columns=["Sex", "Pclass", "Embarked", "Title", "Cabin", "Age"]
+        df, columns=["Sex", "Pclass", "Embarked", "Cabin", "Age"]
     )
     # print(df)
     return df
