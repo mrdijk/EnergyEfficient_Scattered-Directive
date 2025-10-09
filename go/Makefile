@@ -1,6 +1,6 @@
 branch_name := $(shell git rev-parse --abbrev-ref HEAD)
 dynamos := sidecar policy-enforcer orchestrator agent api-gateway
-dockerhub_account := javernus
+dockerhub_account := mdijk
 
 prepare:
 	go mod tidy

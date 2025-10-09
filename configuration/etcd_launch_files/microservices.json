@@ -1,12 +1,12 @@
 [
   {
-    "name": "vfl-train-model",
+    "name": "hfl-train-model",
     "label": "computeProvider",
-    "allowedOutputs": ["vfl-train"],
+    "allowedOutputs": ["hfl-train"],
     "invalidArchetypes": []
   },
   {
-    "name": "vfl-train",
+    "name": "hfl-train",
     "label": "computeProvider",
     "allowedOutputs": [],
     "invalidArchetypes": []

@@ -1,12 +1,37 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -e
 
-{
-# Install Helm
-curl https://baltocdn.com/helm/signing.asc | gpg --dearmor | sudo tee /usr/share/keyrings/helm.gpg > /dev/null
-sudo apt-get install apt-transport-https --yes
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/helm.gpg] https://baltocdn.com/helm/stable/debian/ all main" | sudo tee /etc/apt/sources.list.d/helm-stable-debian.list
+# Remove old helm repo if present
+if [ -f /etc/apt/sources.list.d/helm-stable-debian.list ]; then
+  sudo rm /etc/apt/sources.list.d/helm-stable-debian.list
+fi
+
+# Ensure apt supports HTTPS and curl
 sudo apt-get update
-sudo apt-get install helm
+sudo apt-get install -y curl gpg apt-transport-https
+
+# Add Helm signing key
+curl -fsSL https://packages.buildkite.com/helm-linux/helm-debian/gpgkey | gpg --dearmor | sudo tee /usr/share/keyrings/helm.gpg > /dev/null
+
+# Add Helm apt repo
+echo "deb [signed-by=/usr/share/keyrings/helm.gpg] https://packages.buildkite.com/helm-linux/helm-debian/any/ any main" | \
+  sudo tee /etc/apt/sources.list.d/helm-stable-debian.list
+
+# Update and try installing via apt
+sudo apt-get update
+
+if sudo apt-get install -y helm; then
+  echo "Helm installed via apt"
+else
+  echo "APT install failed — falling back to manual install"
+  VERSION="v3.19.0"
+  curl -fsSL "https://get.helm.sh/helm-${VERSION}-linux-amd64.tar.gz" -o helm-${VERSION}-linux-amd64.tar.gz
+  tar -zxvf helm-${VERSION}-linux-amd64.tar.gz
+  sudo mv linux-amd64/helm /usr/local/bin/helm
+  rm -rf linux-amd64 helm-${VERSION}-linux-amd64.tar.gz
+  echo "Helm manually installed, version:"
+  helm version
+fi
 
 function addPathExport () {
   echo -e "export PATH=$1" >> $HOME/.bashrc

@@ -4,7 +4,7 @@
     "relations": {
       "jake.jongejans@student.uva.nl": {
         "ID": "GUID",
-        "requestTypes": ["vflTrainModelRequest"],
+        "requestTypes": ["hflTrainModelRequest"],
         "allowedArchetypes": ["computeToData"],
         "allowedComputeProviders": ["server"]
       }
@@ -17,7 +17,7 @@
     "relations": {
       "jake.jongejans@student.uva.nl": {
         "ID": "GUID",
-        "requestTypes": ["vflTrainRequest"],
+        "requestTypes": ["hflTrainRequest"],
         "allowedArchetypes": ["computeToData"],
         "allowedComputeProviders": ["clientone"]
       }
@@ -30,7 +30,7 @@
     "relations": {
       "jake.jongejans@student.uva.nl": {
         "ID": "GUID",
-        "requestTypes": ["vflTrainRequest"],
+        "requestTypes": ["hflTrainRequest"],
         "allowedArchetypes": ["computeToData"],
         "allowedComputeProviders": ["clienttwo"]
       }
@@ -43,7 +43,7 @@
     "relations": {
       "jake.jongejans@student.uva.nl": {
         "ID": "GUID",
-        "requestTypes": ["vflTrainRequest"],
+        "requestTypes": ["hflTrainRequest"],
         "allowedArchetypes": ["computeToData"],
         "allowedComputeProviders": ["clientthree"]
       }

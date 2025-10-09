@@ -4,7 +4,7 @@ set -e
 
 # Change this to the path of the DYNAMOS repository on your disk
 echo "Setting up paths..."
-DYNAMOS_ROOT="${HOME}/DYNAMOS"
+DYNAMOS_ROOT="${HOME}/EnergyEfficient_Scattered-Directive"
 
 # Charts
 charts_path="${DYNAMOS_ROOT}/charts"

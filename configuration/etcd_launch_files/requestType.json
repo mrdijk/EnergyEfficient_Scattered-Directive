@@ -1,10 +1,10 @@
 [
   {
-    "name": "vflTrainModelRequest",
-    "requiredServices": ["vfl-train-model", "vfl-train"]
+    "name": "hflTrainModelRequest",
+    "requiredServices": ["hfl-train-model", "hfl-train"]
   },
   {
-    "name": "vflTrainRequest",
-    "requiredServices": ["vfl-train"]
+    "name": "hflTrainRequest",
+    "requiredServices": ["hfl-train"]
   }
 ]

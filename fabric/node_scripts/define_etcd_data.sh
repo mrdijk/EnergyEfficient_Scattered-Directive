@@ -1,7 +1,7 @@
 #!/bin/bash
 
 {
-git clone https://github.com/Javernus/DYNAMOS.git
+git clone https://github.com/mrdijk/EnergyEfficient_Scattered-Directive.git
 
 sudo mkdir -p /mnt/etcd-data
 sudo cp ~/DYNAMOS/configuration/etcd_launch_files/*.json /mnt/etcd-data

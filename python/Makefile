@@ -1,8 +1,8 @@
 SHELL := /bin/bash
-targets := sql-query vfl-train-model vfl-train
+targets := sql-query hfl-train-model hfl-train
 datasets := "../configuration/datasets/"
 branch_name := $(shell git rev-parse --abbrev-ref HEAD)
-dockerhub_account := javernus
+dockerhub_account := mdijk
 
 .PHONY: proto $(targets) dynamos
 

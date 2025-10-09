@@ -115,6 +115,19 @@ func requestHandler() http.HandlerFunc {
 				response = sendDataToAuthProviders(dataRequestJson, msg.AuthorizedProviders, apiReqApproval.Type, msg.JobId)
 			}
 
+			if apiReqApproval.Type == "hflTrainModelRequest" {
+				ctxWithoutCancel := context.WithoutCancel(r.Context())
+				response = runHFLTraining(dataRequestInterface, msg.AuthorizedProviders, msg.JobId, ctxWithoutCancel)
+			} else {
+				dataRequestJson, err := json.Marshal(dataRequestInterface)
+				if err != nil {
+					logger.Sugar().Errorf("Error marshalling combined data: %v", err)
+					return
+				}
+
+				response = sendDataToAuthProviders(dataRequestJson, msg.AuthorizedProviders, apiReqApproval.Type, msg.JobId)
+			}
+
 			w.WriteHeader(http.StatusOK)
 			w.Write(response)
 			return
@@ -125,6 +138,235 @@ func requestHandler() http.HandlerFunc {
 		}
 	}
 }
+
+func runHFLTrainingRound(dataRequest map[string]any, clients map[string]string, serverAuth, serverUrl string, learning_rate float64) (float64, error) {
+	var wg sync.WaitGroup
+	clientUpdates := map[string]string{}
+
+	// Ask each client to train locally 
+	for auth, url := range clients {
+		wg.Add(1)
+		target := strings.ToLower(auth)
+
+		ips, err := net.LookupIP(url)
+		if err == nil && len(ips) != 0 {
+			url = ips[0].String()
+		}
+
+		endpoint := fmt.Sprintf("http://%s:8080/agent/v1/hflTrainRequest/%s", url, target)
+		dataRequest["type"] = "hflTrainRequest"
+		dataRequest["data"] = map[string]any{
+			"learning_rate": learning_rate,
+		}
+
+		dataRequestJson, err := json.Marshal(dataRequest)
+		if err != nil {
+			logger.Sugar().Errorf("Error marshalling combined data: %v", err)
+			return 0., err
+		}
+
+		go func(auth string, endpoint string) {
+			defer wg.Done()
+			responseData, err := sendData(endpoint, dataRequestJson)
+			if err != nil {
+				logger.Sugar().Errorf("Error sending train request to client %s: %v", auth, err)
+				return
+			}
+
+			responseJson := &pb.MicroserviceCommunication{}
+			err = json.Unmarshal([]byte(responseData), responseJson)
+			if err != nil {
+				logger.Sugar().Errorf("Error unmarshalling client %s response: %v", auth, err)
+				return
+			}
+
+			dataJson := responseJson.Data.AsMap()
+			modelUpdate, ok := dataJson["model_update"].(string)
+			if !ok {
+				logger.Sugar().Errorf("No model_update found in client %s response.", auth)
+				return
+			}
+
+			clientUpdates[strings.ToLower(auth)] = modelUpdate
+		}(auth, endpoint)
+	}
+
+	wg.Wait()
+
+	// 2. Send all client model updates to server for aggregation 
+	target := strings.ToLower(serverAuth)
+	serverEndpoint := fmt.Sprintf("http://%s:8080/agent/v1/hflAggregateRequest/%s", serverUrl, target)
+
+updateList := []string{}
+	for _, update := range clientUpdates {
+		updateList = append(updateList, update)
+	}
+
+	dataRequest["type"] = "hflAggregateRequest"
+	dataRequest["data"] = map[string]any{
+		"model_updates": updateList,
+	}
+
+	dataRequestJson, err := json.Marshal(dataRequest)
+	if err != nil {
+		logger.Sugar().Errorf("Error marshalling server aggregation request: %v", err)
+		return 0., err
+	}
+
+	responseData, err := sendData(serverEndpoint, dataRequestJson)
+	if err != nil {
+		logger.Sugar().Errorf("Error sending aggregation request to server: %v", err)
+		return 0., err
+	}
+
+	serverResponse := &pb.MicroserviceCommunication{}
+	err = json.Unmarshal([]byte(responseData), serverResponse)
+	if err != nil {
+		logger.Sugar().Error("Unmarshalling server response failed: ", err)
+	}
+
+	accuracy := serverResponse.Data.GetFields()["accuracy"].GetNumberValue()
+	globalParams := serverResponse.Data.GetFields()["global_params"].GetStringValue()
+
+	// Send the new global model to all clients 
+	for auth, url := range clients {
+		wg.Add(1)
+		target := strings.ToLower(auth)
+		endpoint := fmt.Sprintf("http://%s:8080/agent/v1/hflLoadGlobalModel/%s", url, target)
+
+		dataRequest["type"] = "hflLoadGlobalModel"
+		dataRequest["data"] = map[string]any{
+			"global_params": globalParams,
+		}
+
+		dataRequestJson, err := json.Marshal(dataRequest)
+		if err != nil {
+			logger.Sugar().Errorf("Error marshalling global model broadcast: %v", err)
+			return 0., err
+		}
+
+		go func(auth string, endpoint string) {
+			defer wg.Done()
+			response, err := sendData(endpoint, dataRequestJson)
+			if err != nil {
+				logger.Sugar().Errorf("Error sending global model to client %s: %v, response: %s", auth, err, response)
+			}
+		}(auth, endpoint)
+	}
+
+	wg.Wait()
+	return accuracy, nil
+}
+
+func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]string, jobId string, ctx context.Context) []byte {
+	clients := map[string]string{}
+	var serverUrl string
+	var serverAuth string
+	var finalAccuracy float64
+	var wg sync.WaitGroup
+
+	var cycles int64 = 10
+	var learning_rate float64 = 0.05
+	// var change_policies int64 = -1
+	var dataProviders []string = []string{}
+
+	data, ok := dataRequest["data"].(map[string]any)
+	if ok {
+		if val, ok := data["cycles"].(float64); ok {
+			cycles = int64(val)
+		}
+		if val, ok := data["learning_rate"].(float64); ok {
+			learning_rate = val
+		}
+		// if val, ok := data["change_policies"].(float64); ok {
+		// 	change_policies = int64(val)
+		// }
+	}
+
+	for auth, url := range authorizedProviders {
+		if strings.ToLower(auth) == "server" {
+			serverUrl = url
+			serverAuth = auth
+		} else if url != "" {
+			clients[auth] = url
+		}
+		dataProviders = append(dataProviders, auth)
+	}
+
+	logger.Sugar().Info("Sending ping to start pods...")
+	dataRequest["type"] = "hflPingRequest"
+
+	dataRequestJson, err := json.Marshal(dataRequest)
+	if err != nil {
+		logger.Sugar().Errorf("Error marshalling ping request: %v", err)
+		return []byte{}
+	}
+
+	for auth, url := range authorizedProviders {
+		wg.Add(1)
+		target := strings.ToLower(auth)
+		endpoint := fmt.Sprintf("http://%s:8080/agent/v1/hflPingRequest/%s", url, target)
+
+		go func() {
+			for i := range 5 {
+				_, err := sendData(endpoint, dataRequestJson)
+				if err == nil {
+					break
+				}
+				if i == 4 {
+					logger.Sugar().Errorf("No ping response from %s", target)
+				}
+			}
+			wg.Done()
+		}()
+	}
+
+	wg.Wait()
+
+	logger.Sugar().Info("Running HFL for ", cycles, " rounds")
+	for round := range cycles {
+		logger.Sugar().Info("Running HFL training round ", round)
+
+		accuracy, err := runHFLTrainingRound(dataRequest, clients, serverAuth, serverUrl, learning_rate)
+		if err != nil {
+			logger.Sugar().Errorf("Training round %d returned an error: %v", round, err)
+			break
+		}
+
+		finalAccuracy = accuracy
+		logger.Sugar().Info("- Intermediate accuracy achieved: ", accuracy, " for round ", round)
+	}
+
+	// Shutdown all microservices
+	dataRequest["type"] = "hflShutdownRequest"
+	dataRequestJson, err = json.Marshal(dataRequest)
+	if err != nil {
+		logger.Sugar().Errorf("Error marshalling shutdown request: %v", err)
+		return []byte{}
+	}
+
+	for auth, url := range authorizedProviders {
+		wg.Add(1)
+		target := strings.ToLower(auth)
+		endpoint := fmt.Sprintf("http://%s:8080/agent/v1/hflShutdownRequest/%s", url, target)
+
+		go func() {
+			sendData(endpoint, dataRequestJson)
+			wg.Done()
+		}()
+	}
+
+	wg.Wait()
+
+	response := map[string]any{
+		"jobId":    jobId,
+		"accuracy": finalAccuracy,
+	}
+
+	logger.Sugar().Info("Final HFL accuracy achieved: ", finalAccuracy)
+	return cleanupAndMarshalResponse(response)
+}
+
 
 func runVFLTrainingRound(dataRequest map[string]any, clients map[string]string, serverAuth string, serverUrl string, learning_rate float64) (float64, error) {
 	var wg sync.WaitGroup
