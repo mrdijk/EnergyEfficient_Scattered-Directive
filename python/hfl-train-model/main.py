@@ -20,21 +20,38 @@ from collections import OrderedDict
 
 np.set_printoptions(threshold=sys.maxsize)
 
-# --- DYNAMOS Interface setup ---------------------------
+# --- DYNAMOS Interface code At the TOP ---------------------------
 if os.getenv('ENV') == 'PROD':
     import config_prod as config
 else:
     import config_local as config
 
 logger = InitLogger()
+# tracer = InitTracer(config.service_name, config.tracing_host)
+
+# Events to start the shutdown of this Microservice, can be used to call 'signal_shutdown'
 stop_event = threading.Event()
 stop_microservice_condition = threading.Condition()
+
+# Events to make sure all services have started before starting to process a message
+# Might be overkill, but good practice
 wait_for_setup_event = threading.Event()
 wait_for_setup_condition = threading.Condition()
 
 ms_config = None
-hfl_server = None
-# --------------------------------------------------------
+vfl_server = None
+
+# --- END DYNAMOS Interface code At the TOP ----------------------
+
+# ---- LOCAL TEST SETUP OPTIONAL!
+
+# Go into local test code with flag '-t'
+# parser = argparse.ArgumentParser()
+# parser.add_argument("-t", "--test", action='store_true')
+# args = parser.parse_args()
+# test = args.test
+
+# --------------------------------
 
 
 def load_data(file_path):
@@ -71,8 +88,6 @@ def deserialise_array(string, hook=None):
         return dataArray.reshape(encoded_data[2])
     return dataArray
 
-
-# --------------------- MODEL --------------------------
 class ServerModel(nn.Module):
     def __init__(self, input_size):
         super(ServerModel, self).__init__()
@@ -83,7 +98,6 @@ class ServerModel(nn.Module):
         return self.sigmoid(self.fc(x))
 
 
-# --------------------- HFL SERVER ----------------------
 class HFLServer:
     def __init__(self, data):
         self.device = "cpu"
@@ -96,6 +110,7 @@ class HFLServer:
             data.drop("Survived", axis=1).values
         ).float()
         self.model = ServerModel(self.data.shape[1])
+
 
     def aggregate_fit(self, client_updates):
         """
@@ -144,7 +159,6 @@ class HFLServer:
         return data
 
 
-# ----------------- REQUEST HANDLERS --------------------
 def handleAggregateRequest(msComm):
     global ms_config
     global hfl_server
@@ -172,7 +186,6 @@ def handleAggregateRequest(msComm):
     ms_config.next_client.ms_comm.send_data(msComm, agg_result, {})
 
 
-# ------------------- DYNAMOS HANDLER -------------------
 def request_handler(msComm: msCommTypes.MicroserviceCommunication,
                     ctx: Context = None):
     global ms_config
@@ -214,7 +227,6 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication,
         return Empty()
 
 
-# ------------------------- MAIN ------------------------
 def main():
     global config
     global ms_config
@@ -226,8 +238,10 @@ def main():
     ms_config = NewConfiguration(
         config.service_name, config.grpc_addr, request_handler)
 
+    # Signal the message handler that all connections have been created
     signal_continuation(wait_for_setup_event, wait_for_setup_condition)
 
+    # Wait for the end of processing to shutdown this Microservice
     try:
         signal_wait(stop_event, stop_microservice_condition)
     except KeyboardInterrupt:
@@ -238,6 +252,7 @@ def main():
     logger.debug(f"Exiting {config.service_name}")
     sys.exit(0)
 
+# ---  END DYNAMOS Interface code At the Bottom -----------------
 
 if __name__ == "__main__":
     main()

@@ -20,21 +20,27 @@ from opentelemetry.context.context import Context
 
 np.set_printoptions(threshold=sys.maxsize)
 
-# --- DYNAMOS Interface setup ---------------------------
+# --- DYNAMOS Interface code At the TOP ---------------------------
 if os.getenv('ENV') == 'PROD':
     import config_prod as config
 else:
     import config_local as config
 
 logger = InitLogger()
+# tracer = InitTracer(config.service_name, config.tracing_host)
 
+# Events to start the shutdown of this Microservice, can be used to call 'signal_shutdown'
 stop_event = threading.Event()
 stop_microservice_condition = threading.Condition()
+
+# Events to make sure all services have started before starting to process a message
+# Might be overkill, but good practice
 wait_for_setup_event = threading.Event()
 wait_for_setup_condition = threading.Condition()
 
 ms_config = None
-# --------------------------------------------------------
+
+# --- END DYNAMOS Interface code At the TOP ----------------------
 
 
 def load_data(file_path):
@@ -171,7 +177,6 @@ class HFLClient:
             logger.error(f"Failed to load global model: {e}")
 
 
-# ------------------- DYNAMOS request handler -------------------
 def request_handler(msComm: msCommTypes.MicroserviceCommunication,
                     ctx: Context = None):
     global ms_config
@@ -190,16 +195,16 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication,
     DATA_STEWARD_NAME = os.getenv("DATA_STEWARD_NAME").lower()
 
     if DATA_STEWARD_NAME == "server":
-        # Relay server messages if accidentally routed here
+        # Relay server messages 
         if request.type == "hflShutdownRequest":
             logger.info("Received hflShutdownRequest, shutting down.")
             ms_config.next_client.ms_comm.send_data(msComm, msComm.data, {})
             signal_continuation(stop_event, stop_microservice_condition)
         else:
-            logger.info("Relay mode: forwarding server message.")
+            logger.info("Server relaying request.")
             ms_config.next_client.ms_comm.send_data(msComm, msComm.data, {})
     else:
-        # -------- CLIENT SIDE --------
+        # Client side
         if request is not None:
             if request.type == "hflTrainRequest":
                 logger.info("Received hflTrainRequest (client training).")
@@ -219,8 +224,9 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication,
                 logger.info("Received hflLoadGlobalModel (update local model).")
                 try:
                     global_params_json = request.data["global_params"].string_value
-                    hfl_client.load_global_model(global_params_json)
+                    global_params = hfl_client.load_global_model(global_params_json)
                     data = Struct()
+                    data.update({"global_params": global_params })
                 except Exception as e:
                     logger.error(f"Failed to load global model: {e}")
                     data = Struct()
@@ -240,7 +246,6 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication,
             return Empty()
 
 
-# -------------------------- MAIN -------------------------------
 def main():
     global config
     global ms_config
@@ -268,6 +273,7 @@ def main():
     logger.debug(f"Exiting {config.service_name}")
     sys.exit(0)
 
+# ---  END DYNAMOS Interface code At the Bottom -----------------
 
 if __name__ == "__main__":
     main()

@@ -101,24 +101,26 @@ func requestHandler() http.HandlerFunc {
 
 			var response []byte
 
-			if apiReqApproval.Type == "vflTrainModelRequest" {
-				ctxWithoutCancel := context.WithoutCancel(r.Context())
-				response = runVFLTraining(dataRequestInterface, msg.AuthorizedProviders, msg.JobId, ctxWithoutCancel)
-			} else {
-				// Marshal the combined data back into JSON for forwarding
-				dataRequestJson, err := json.Marshal(dataRequestInterface)
-				if err != nil {
-					logger.Sugar().Errorf("Error marshalling combined data: %v", err)
-					return
-				}
+			// if apiReqApproval.Type == "vflTrainModelRequest" {
+			// 	ctxWithoutCancel := context.WithoutCancel(r.Context())
+			// 	response = runVFLTraining(dataRequestInterface, msg.AuthorizedProviders, msg.JobId, ctxWithoutCancel)
+			// } else {
+			// 	// Marshal the combined data back into JSON for forwarding
+			// 	dataRequestJson, err := json.Marshal(dataRequestInterface)
+			// 	if err != nil {
+			// 		logger.Sugar().Errorf("Error marshalling combined data: %v", err)
+			// 		return
+			// 	}
 
-				response = sendDataToAuthProviders(dataRequestJson, msg.AuthorizedProviders, apiReqApproval.Type, msg.JobId)
-			}
+			// 	response = sendDataToAuthProviders(dataRequestJson, msg.AuthorizedProviders, apiReqApproval.Type, msg.JobId)
+			// }
 
 			if apiReqApproval.Type == "hflTrainModelRequest" {
 				ctxWithoutCancel := context.WithoutCancel(r.Context())
+				logger.Sugar().Info("Start HFL Training")
 				response = runHFLTraining(dataRequestInterface, msg.AuthorizedProviders, msg.JobId, ctxWithoutCancel)
 			} else {
+				logger.Sugar().Info("Forward data")
 				dataRequestJson, err := json.Marshal(dataRequestInterface)
 				if err != nil {
 					logger.Sugar().Errorf("Error marshalling combined data: %v", err)
@@ -155,6 +157,7 @@ func runHFLTrainingRound(dataRequest map[string]any, clients map[string]string, 
 
 		endpoint := fmt.Sprintf("http://%s:8080/agent/v1/hflTrainRequest/%s", url, target)
 		dataRequest["type"] = "hflTrainRequest"
+		
 		dataRequest["data"] = map[string]any{
 			"learning_rate": learning_rate,
 		}
@@ -168,8 +171,9 @@ func runHFLTrainingRound(dataRequest map[string]any, clients map[string]string, 
 		go func(auth string, endpoint string) {
 			defer wg.Done()
 			responseData, err := sendData(endpoint, dataRequestJson)
+			
 			if err != nil {
-				logger.Sugar().Errorf("Error sending train request to client %s: %v", auth, err)
+				logger.Sugar().Errorf("Error sending data to client %s: %v", auth, err)
 				return
 			}
 
@@ -188,14 +192,15 @@ func runHFLTrainingRound(dataRequest map[string]any, clients map[string]string, 
 			}
 
 			clientUpdates[strings.ToLower(auth)] = modelUpdate
+			wg.Done()
 		}(auth, endpoint)
 	}
 
 	wg.Wait()
 
-	// 2. Send all client model updates to server for aggregation 
+	// Send all client model updates to server for aggregation 
 	target := strings.ToLower(serverAuth)
-	serverEndpoint := fmt.Sprintf("http://%s:8080/agent/v1/hflAggregateRequest/%s", serverUrl, target)
+	serverEndpoint := fmt.Sprintf("http://%s:8080/agent/v1/hflTrainRequest/%s", serverUrl, target)
 
 updateList := []string{}
 	for _, update := range clientUpdates {
@@ -232,7 +237,7 @@ updateList := []string{}
 	for auth, url := range clients {
 		wg.Add(1)
 		target := strings.ToLower(auth)
-		endpoint := fmt.Sprintf("http://%s:8080/agent/v1/hflLoadGlobalModel/%s", url, target)
+		endpoint := fmt.Sprintf("http://%s:8080/agent/v1/hflTrainRequest/%s", url, target)
 
 		dataRequest["type"] = "hflLoadGlobalModel"
 		dataRequest["data"] = map[string]any{
@@ -271,6 +276,8 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 	var dataProviders []string = []string{}
 
 	data, ok := dataRequest["data"].(map[string]any)
+	logger.Sugar().Info("Data from req: ", data)
+
 	if ok {
 		if val, ok := data["cycles"].(float64); ok {
 			cycles = int64(val)
@@ -302,23 +309,45 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 		return []byte{}
 	}
 
+	user, ok := dataRequest["user"].(*pb.User)
+
+	if !ok {
+		logger.Sugar().Info("Did not retrieve User from dataRequest, cannot dynamically verify each training round.")
+		user = &pb.User{}
+	}
+
+	var noPing bool = false
+	
+	logger.Sugar().Info("providers: ", authorizedProviders)
+
 	for auth, url := range authorizedProviders {
 		wg.Add(1)
 		target := strings.ToLower(auth)
-		endpoint := fmt.Sprintf("http://%s:8080/agent/v1/hflPingRequest/%s", url, target)
+		endpoint := fmt.Sprintf("http://%s:8080/agent/v1/hflTrainRequest/%s", url, target)
+
+		logger.Sugar().Info("Target/Endpoint: ", target, " ", endpoint)
 
 		go func() {
+			// TODO: Repeat ping until no error, after 5 tries, cancel request
 			for i := range 5 {
 				_, err := sendData(endpoint, dataRequestJson)
+
 				if err == nil {
 					break
 				}
+
 				if i == 4 {
-					logger.Sugar().Errorf("No ping response from %s", target)
+					noPing = true
 				}
+				logger.Sugar().Info("noPing: ", noPing)
 			}
+
 			wg.Done()
 		}()
+	}
+
+	if noPing {
+		logger.Sugar().Error("No ping from a client or the server. Something is wrong.")
 	}
 
 	wg.Wait()
@@ -326,7 +355,44 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 	logger.Sugar().Info("Running HFL for ", cycles, " rounds")
 	for round := range cycles {
 		logger.Sugar().Info("Running HFL training round ", round)
+		protoRequest := &pb.RequestApproval{
+			Type:             "hflTrainModelRequest",
+			User:             user,
+			DataProviders:    dataProviders,
+			DestinationQueue: "policyEnforcer-in",
+		}
 
+		// Create a channel to receive the response
+		responseChan := make(chan validation)
+
+		requestApprovalMutex.Lock()
+		requestApprovalMap[protoRequest.User.Id] = responseChan
+		requestApprovalMutex.Unlock()
+
+		noValidation := false
+
+		logger.Sugar().Info("- Sending policy reverification request")
+		for i := range 5 {
+			_, err = c.SendRequestApproval(ctx, protoRequest)
+			if err != nil {
+				logger.Sugar().Warnf("error in sending/receiving requestApproval: %v", err)
+			}
+
+			if err == nil {
+				break
+			}
+
+			if i == 4 {
+				noValidation = true
+			}
+		}
+
+		if noValidation {
+			logger.Sugar().Error("No reverification approval received, error in network. Shutting down operation.")
+			break
+		}
+
+		logger.Sugar().Info("Sending training request")
 		accuracy, err := runHFLTrainingRound(dataRequest, clients, serverAuth, serverUrl, learning_rate)
 		if err != nil {
 			logger.Sugar().Errorf("Training round %d returned an error: %v", round, err)
@@ -336,6 +402,10 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 		finalAccuracy = accuracy
 		logger.Sugar().Info("- Intermediate accuracy achieved: ", accuracy, " for round ", round)
 	}
+
+	logger.Sugar().Info("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
+	logger.Sugar().Info("Final accuracy achieved: ", finalAccuracy)
+	logger.Sugar().Info("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
 
 	// Shutdown all microservices
 	dataRequest["type"] = "hflShutdownRequest"
@@ -363,7 +433,10 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 		"accuracy": finalAccuracy,
 	}
 
+	logger.Sugar().Info("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
 	logger.Sugar().Info("Final HFL accuracy achieved: ", finalAccuracy)
+	logger.Sugar().Info("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
+	
 	return cleanupAndMarshalResponse(response)
 }
 
