@@ -120,7 +120,7 @@ func requestHandler() http.HandlerFunc {
 				logger.Sugar().Info("Start HFL Training")
 				response = runHFLTraining(dataRequestInterface, msg.AuthorizedProviders, msg.JobId, ctxWithoutCancel)
 			} else {
-				logger.Sugar().Info("Forward data")
+				// logger.Sugar().Info("Forward data")
 				dataRequestJson, err := json.Marshal(dataRequestInterface)
 				if err != nil {
 					logger.Sugar().Errorf("Error marshalling combined data: %v", err)
@@ -325,8 +325,6 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 		target := strings.ToLower(auth)
 		endpoint := fmt.Sprintf("http://%s:8080/agent/v1/hflTrainRequest/%s", url, target)
 
-		logger.Sugar().Info("Target/Endpoint: ", target, " ", endpoint)
-
 		go func() {
 			// TODO: Repeat ping until no error, after 5 tries, cancel request
 			for i := range 5 {
@@ -339,7 +337,6 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 				if i == 4 {
 					noPing = true
 				}
-				logger.Sugar().Info("noPing: ", noPing)
 			}
 
 			wg.Done()

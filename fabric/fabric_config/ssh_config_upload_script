@@ -1,0 +1,21 @@
+# Specific upload script SSH config for custom setup with FABRIC, does not work with main ssh_config
+UserKnownHostsFile /dev/null
+StrictHostKeyChecking no
+ServerAliveInterval 120
+
+# Bastion host config
+Host bastion.fabric-testbed.net
+    User m_r_dijk_0000315553
+    ForwardAgent yes
+    IdentityFile ~/.ssh/fabric_bastion_key
+    IdentitiesOnly yes
+
+# Match specific node used (change IP to correct node IP)
+Host dynamos
+  HostName 2001:610:2d0:fabc:f816:3eff:fe99:c618
+  User ubuntu
+  IdentityFile ~/.ssh/slice_key
+  ProxyJump m_r_dijk_0000315553@bastion.fabric-testbed.net
+  IdentitiesOnly yes
+  StrictHostKeyChecking no
+  UserKnownHostsFile /dev/null
