@@ -56,7 +56,7 @@ vfl_server = None
 
 def load_data(file_path):
     DATA_STEWARD_NAME = os.getenv("DATA_STEWARD_NAME").lower()
-    file_name = f"{file_path}/outcomeData.csv"
+    file_name = f"{file_path}/titanic_training.csv"
 
     if DATA_STEWARD_NAME == "":
         logger.error("DATA_STEWARD_NAME not set.")
@@ -91,11 +91,14 @@ def deserialise_array(string, hook=None):
 class ServerModel(nn.Module):
     def __init__(self, input_size):
         super(ServerModel, self).__init__()
-        self.fc = nn.Linear(input_size, 1)
+        self.fc1 = nn.Linear(input_size, 12)
+        self.fc2 = nn.Linear(12,1)
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
-        return self.sigmoid(self.fc(x))
+        x = self.fc1(x)
+        x = self.fc2(x)
+        return self.sigmoid(x)
 
 
 class HFLServer:
