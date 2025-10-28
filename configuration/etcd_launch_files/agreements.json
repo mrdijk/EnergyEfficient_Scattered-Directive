@@ -2,7 +2,7 @@
   {
     "name": "server",
     "relations": {
-      "maurits.dijk@student.uva.nl@student.uva.nl": {
+      "maurits.dijk@student.uva.nl": {
         "ID": "GUID",
         "requestTypes": ["hflTrainModelRequest"],
         "allowedArchetypes": ["computeToData"],
@@ -15,7 +15,7 @@
   {
     "name": "clientone",
     "relations": {
-      "maurits.dijk@student.uva.nl@student.uva.nl": {
+      "maurits.dijk@student.uva.nl": {
         "ID": "GUID",
         "requestTypes": ["hflTrainRequest"],
         "allowedArchetypes": ["computeToData"],
@@ -28,7 +28,7 @@
   {
     "name": "clienttwo",
     "relations": {
-      "maurits.dijk@student.uva.nl@student.uva.nl": {
+      "maurits.dijk@student.uva.nl": {
         "ID": "GUID",
         "requestTypes": ["hflTrainRequest"],
         "allowedArchetypes": ["computeToData"],
@@ -41,7 +41,7 @@
   {
     "name": "clientthree",
     "relations": {
-      "maurits.dijk@student.uva.nl@student.uva.nl": {
+      "maurits.dijk@student.uva.nl": {
         "ID": "GUID",
         "requestTypes": ["hflTrainRequest"],
         "allowedArchetypes": ["computeToData"],
