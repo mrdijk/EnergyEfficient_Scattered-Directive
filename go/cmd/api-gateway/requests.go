@@ -321,9 +321,11 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 	logger.Sugar().Info("providers: ", authorizedProviders)
 
 	for auth, url := range authorizedProviders {
+		logger.Sugar().Infof("provider: %s", auth)
 		wg.Add(1)
 		target := strings.ToLower(auth)
 		endpoint := fmt.Sprintf("http://%s:8080/agent/v1/hflTrainRequest/%s", url, target)
+		logger.Sugar().Infof("Endpoint: %s", endpoint)
 
 		go func() {
 			// TODO: Repeat ping until no error, after 5 tries, cancel request
@@ -336,6 +338,7 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 
 				if i == 4 {
 					noPing = true
+					logger.Sugar().Error("No ping is true")
 				}
 			}
 
@@ -843,9 +846,13 @@ func sendData(endpoint string, jsonData []byte) (string, error) {
 	headers := map[string]string{
 		"Authorization": "bearer 1234",
 	}
+	logger.Sugar().Infof("POST -> %s", endpoint)
 	body, err := api.PostRequest(endpoint, string(jsonData), headers)
 	if err != nil {
+		logger.Sugar().Errorf("POST error to %s: %v", endpoint, err)
 		return "", err
+	} else {
+		logger.Sugar().Infof("POST OK from %s: %s", endpoint, body)
 	}
 
 	return string(body), nil
