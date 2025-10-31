@@ -157,7 +157,6 @@ func runHFLTrainingRound(dataRequest map[string]any, clients map[string]string, 
 
 		endpoint := fmt.Sprintf("http://%s:8080/agent/v1/hflTrainRequest/%s", url, target)
 		dataRequest["type"] = "hflTrainRequest"
-		
 		dataRequest["data"] = map[string]any{
 			"learning_rate": learning_rate,
 		}
@@ -192,7 +191,7 @@ func runHFLTrainingRound(dataRequest map[string]any, clients map[string]string, 
 			}
 
 			clientUpdates[strings.ToLower(auth)] = modelUpdate
-			wg.Done()
+			// wg.Done()
 		}(auth, endpoint)
 	}
 
@@ -317,18 +316,21 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 	}
 
 	var noPing bool = false
+	var noPingAuth []string
 	
 	logger.Sugar().Info("providers: ", authorizedProviders)
 
 	for auth, url := range authorizedProviders {
 		logger.Sugar().Infof("provider: %s", auth)
+		
 		wg.Add(1)
+
 		target := strings.ToLower(auth)
 		endpoint := fmt.Sprintf("http://%s:8080/agent/v1/hflTrainRequest/%s", url, target)
 		logger.Sugar().Infof("Endpoint: %s", endpoint)
 
-		go func() {
-			// TODO: Repeat ping until no error, after 5 tries, cancel request
+		go func(auth string, endpoint string) {
+			logger.Sugar().Infof("Sending Ping to %s", auth)
 			for i := range 5 {
 				_, err := sendData(endpoint, dataRequestJson)
 
@@ -338,19 +340,20 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 
 				if i == 4 {
 					noPing = true
-					logger.Sugar().Error("No ping is true")
+					noPingAuth = append(noPingAuth, auth)
+					logger.Sugar().Error("No ping %s", auth)
 				}
 			}
 
 			wg.Done()
-		}()
-	}
-
-	if noPing {
-		logger.Sugar().Error("No ping from a client or the server. Something is wrong.")
+		}(auth, endpoint)
 	}
 
 	wg.Wait()
+
+	if noPing {
+		logger.Sugar().Error("No ping from %s. Something is wrong.", noPingAuth)
+	}
 
 	logger.Sugar().Info("Running HFL for ", cycles, " rounds")
 	for round := range cycles {
@@ -420,10 +423,10 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 		target := strings.ToLower(auth)
 		endpoint := fmt.Sprintf("http://%s:8080/agent/v1/hflShutdownRequest/%s", url, target)
 
-		go func() {
+		go func(auth string, endpoint string) {
 			sendData(endpoint, dataRequestJson)
 			wg.Done()
-		}()
+		}(auth, endpoint)
 	}
 
 	wg.Wait()

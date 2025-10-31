@@ -39,7 +39,7 @@ wait_for_setup_event = threading.Event()
 wait_for_setup_condition = threading.Condition()
 
 ms_config = None
-vfl_server = None
+hfl_server = None
 
 # --- END DYNAMOS Interface code At the TOP ----------------------
 
@@ -105,13 +105,14 @@ class HFLServer:
     def __init__(self, data):
         self.device = "cpu"
 
-        if "Survived" not in data.columns:
-            raise ValueError("Dataset must contain 'Survived' column.")
+        # if "Survived" not in data.columns:
+        #     raise ValueError("Dataset must contain 'Survived' column.")
 
         self.labels = torch.tensor(data["Survived"].values).float().unsqueeze(1)
         self.data = torch.tensor(
             data.drop("Survived", axis=1).values
         ).float()
+        
         self.model = ServerModel(self.data.shape[1])
 
 

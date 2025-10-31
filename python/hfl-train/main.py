@@ -51,6 +51,10 @@ def load_data(file_path):
         logger.error("DATA_STEWARD_NAME not set.")
         file_name = f"{file_path}Data.csv"
 
+    # Load correct dataset for the server
+    if DATA_STEWARD_NAME == "server":
+        file_name = f"{file_path}/titanic_training.csv"
+
     try:
         data = pd.read_csv(file_name, delimiter=',')
     except FileNotFoundError:
@@ -62,7 +66,7 @@ def load_data(file_path):
 
 class ClientModel(nn.Module):
     def __init__(self, input_size):
-        super().__init__()
+        super(ClientModel, self).__init__()
         self.fc1 = nn.Linear(input_size, 12)
         self.fc2 = nn.Linear(12,1)
         self.sigmoid = nn.Sigmoid()
@@ -99,19 +103,11 @@ class HFLClient:
     """
 
     def __init__(self, data, learning_rate=0.01, model_state=None, optimiser_state=None):
-        try:
-            scaled = StandardScaler().fit_transform(data)
-            self.data = torch.tensor(scaled).float()
-        except Exception as e:
-            logger.error(f"StandardScaler failed in client init: {e}")
-            raise
+        self.labels = torch.tensor(data["Survived"].values).float().unsqueeze(1)
+        self.data = torch.tensor(data.drop("Survived", axis=1).values).float()
 
-        if "Survived" in data.columns:
-            self.labels = torch.tensor(data["Survived"].values).float().unsqueeze(1)
-        else:
-            self.labels = None
+        self.model = ClientModel(self.data.shape[1])
 
-        self.model = ClientModel(data.shape[1])
         if model_state is not None:
             self.model.load_state_dict(model_state)
 
@@ -136,6 +132,7 @@ class HFLClient:
         loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
         self.model.train()
+
         for _ in range(epochs):
             for X, y in loader:
                 self.optimiser.zero_grad()
