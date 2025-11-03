@@ -169,8 +169,9 @@ func runHFLTrainingRound(dataRequest map[string]any, clients map[string]string, 
 
 		go func(auth string, endpoint string) {
 			defer wg.Done()
+			logger.Sugar().Infof("Sending training request to: %s", auth)
+
 			responseData, err := sendData(endpoint, dataRequestJson)
-			
 			if err != nil {
 				logger.Sugar().Errorf("Error sending data to client %s: %v", auth, err)
 				return
@@ -191,7 +192,6 @@ func runHFLTrainingRound(dataRequest map[string]any, clients map[string]string, 
 			}
 
 			clientUpdates[strings.ToLower(auth)] = modelUpdate
-			// wg.Done()
 		}(auth, endpoint)
 	}
 
@@ -251,6 +251,7 @@ updateList := []string{}
 
 		go func(auth string, endpoint string) {
 			defer wg.Done()
+			logger.Sugar().Infof("Sending global model to %s", auth)
 			response, err := sendData(endpoint, dataRequestJson)
 			if err != nil {
 				logger.Sugar().Errorf("Error sending global model to client %s: %v, response: %s", auth, err, response)
@@ -259,6 +260,7 @@ updateList := []string{}
 	}
 
 	wg.Wait()
+
 	return accuracy, nil
 }
 
@@ -341,7 +343,7 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 				if i == 4 {
 					noPing = true
 					noPingAuth = append(noPingAuth, auth)
-					logger.Sugar().Error("No ping %s", auth)
+					logger.Sugar().Errorf("No ping %s", auth)
 				}
 			}
 
@@ -352,11 +354,16 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 	wg.Wait()
 
 	if noPing {
-		logger.Sugar().Error("No ping from %s. Something is wrong.", noPingAuth)
+		logger.Sugar().Errorf("No ping from %s.", noPingAuth)
 	}
 
+	logger.Sugar().Info("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
+	logger.Sugar().Info("-=-=-=-=-=-=Starting training-=-=-=-=-=-=-=-=")
+	logger.Sugar().Info("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
 	logger.Sugar().Info("Running HFL for ", cycles, " rounds")
-	for round := range cycles {
+
+	TrainLoop:
+ 		for round := int64(0); round < cycles; round++ {
 		logger.Sugar().Info("Running HFL training round ", round)
 		protoRequest := &pb.RequestApproval{
 			Type:             "hflTrainModelRequest",
@@ -392,18 +399,34 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 
 		if noValidation {
 			logger.Sugar().Error("No reverification approval received, error in network. Shutting down operation.")
-			break
+			break TrainLoop
 		}
 
-		logger.Sugar().Info("Sending training request")
+		validationStruct := <-responseChan
+		msg := validationStruct.response
+		logger.Sugar().Info("Received validation message: ", msg, ", with vstruct: ", validationStruct)
+
+		if msg.Type != "requestApprovalResponse" {
+			logger.Sugar().Errorf("Unexpected message received, type: %s", msg.Type)
+			return []byte{}
+		}
+
+		if msg.Error != "" || len(msg.AuthorizedProviders) != len(authorizedProviders) {
+			logger.Sugar().Info("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
+			logger.Sugar().Info("   Policy does not allow this training to continue.")
+			logger.Sugar().Info("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
+			break TrainLoop
+		}
+
+		logger.Sugar().Info("Sending training requests")
 		accuracy, err := runHFLTrainingRound(dataRequest, clients, serverAuth, serverUrl, learning_rate)
-		if err != nil {
-			logger.Sugar().Errorf("Training round %d returned an error: %v", round, err)
-			break
-		}
-
 		finalAccuracy = accuracy
 		logger.Sugar().Info("- Intermediate accuracy achieved: ", accuracy, " for round ", round)
+
+		if err != nil {
+			logger.Sugar().Errorf("Training round %d returned an error: %v", round, err)
+			break TrainLoop
+		}
 	}
 
 	logger.Sugar().Info("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
@@ -424,6 +447,7 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 		endpoint := fmt.Sprintf("http://%s:8080/agent/v1/hflShutdownRequest/%s", url, target)
 
 		go func(auth string, endpoint string) {
+			logger.Sugar().Infof("-- Sending shutdown request to -> %s ", auth)
 			sendData(endpoint, dataRequestJson)
 			wg.Done()
 		}(auth, endpoint)
