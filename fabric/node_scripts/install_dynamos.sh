@@ -29,7 +29,7 @@ else
   tar -zxvf helm-${VERSION}-linux-amd64.tar.gz
   sudo mv linux-amd64/helm /usr/local/bin/helm
   rm -rf linux-amd64 helm-${VERSION}-linux-amd64.tar.gz
-  echo "Helm manually installed, version:"
+  echo "Helm manually installed, version:"https://linkerd.io/2.18/getting-started/
   helm version
 fi
 
