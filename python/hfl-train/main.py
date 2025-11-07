@@ -67,14 +67,13 @@ def load_data(file_path):
 class ClientModel(nn.Module):
     def __init__(self, input_size):
         super(ClientModel, self).__init__()
-        self.fc1 = nn.Linear(input_size, 12)
-        self.fc2 = nn.Linear(12,1)
-        self.sigmoid = nn.Sigmoid()
+        self.fc1 = nn.Linear(input_size, 32)
+        self.relu = nn.ReLU()
+        self.fc2 = nn.Linear(32, 1)
 
     def forward(self, x):
-        x = self.fc1(x)
-        x = self.fc2(x)
-        return self.sigmoid(x)
+        x = self.relu(self.fc1(x))
+        return self.fc2(x) 
 
 
 def serialise_array(array):
@@ -101,56 +100,49 @@ class HFLClient:
     - returns serialized model parameters
     - can load the global model from the server
     """
-
-    def __init__(self, data, learning_rate=0.01, model_state=None, optimiser_state=None):
+    def __init__(self, data, learning_rate=0.01, model_state=None):
+        self.data = torch.tensor(data.drop("Survived", axis=1).values).float() 
         self.labels = torch.tensor(data["Survived"].values).float().unsqueeze(1)
-        self.data = torch.tensor(data.drop("Survived", axis=1).values).float()
 
         self.model = ClientModel(self.data.shape[1])
-
         if model_state is not None:
             self.model.load_state_dict(model_state)
 
-        self.optimiser = None
-        self.learning_rate = learning_rate
-        self.criterion = nn.BCELoss()
+        # Loss with class balancing
+        pos_weight = torch.tensor([len(self.labels) / sum(self.labels) - 1])  # roughly inverse class ratio
+        self.criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
 
-    def create_optimiser(self, learning_rate=None):
-        if learning_rate is None:
-            learning_rate = self.learning_rate
-        if self.optimiser is None:
-            self.optimiser = torch.optim.SGD(self.model.parameters(), lr=learning_rate)
 
     def train_local(self, epochs=1, batch_size=32):
         """Perform local training."""
         if self.labels is None:
             logger.error("Client has no labels for training.")
             return
-
-        self.create_optimiser(self.learning_rate)
+        
+        self.model.train()
         dataset = torch.utils.data.TensorDataset(self.data, self.labels)
         loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
-        self.model.train()
-
         for _ in range(epochs):
-            for X, y in loader:
-                self.optimiser.zero_grad()
-                outputs = self.model(X)
-                loss = self.criterion(outputs, y)
+            for X_batch, y_batch in loader:
+                self.optimizer.zero_grad()
+                outputs = self.model(X_batch)
+                loss = self.criterion(outputs, y_batch)
                 loss.backward()
-                self.optimiser.step()
-
+                self.optimizer.step()
+    
     def evaluate(self):
         """Evaluate on local data."""
         if self.labels is None:
             return None
         self.model.eval()
         with torch.no_grad():
-            outputs = self.model(self.data)
-            preds = (outputs > 0.5).float()
-            acc = (preds == self.labels).sum().item() / len(self.labels) * 100
-        return acc
+            logits = self.model(self.data)
+            preds = torch.sigmoid(logits)
+            predicted = (preds > 0.5)
+            accuracy = (predicted == self.labels).sum().item() / len(self.labels)
+        return accuracy
 
     def get_model_update(self):
         """Serialize model parameters and sample count."""
@@ -216,6 +208,8 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication,
 
                 hfl_client.train_local(epochs=epochs)
                 model_update_json = hfl_client.get_model_update()
+                acc = hfl_client.evaluate()
+                logger.info(f"Local modal accuracy is {acc:.2f}%")
 
                 data = Struct()
                 data.update({"model_update": model_update_json})

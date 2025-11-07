@@ -230,8 +230,11 @@ updateList := []string{}
 	}
 
 	accuracy := serverResponse.Data.GetFields()["accuracy"].GetNumberValue()
+	loss := serverResponse.Data.GetFields()["loss"].GetNumberValue()
 	globalParams := serverResponse.Data.GetFields()["global_params"].GetStringValue()
 
+
+	logger.Sugar().Infof("Loss of global model: %f", loss)
 	// Send the new global model to all clients 
 	for auth, url := range clients {
 		wg.Add(1)
@@ -444,9 +447,9 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 	for auth, url := range authorizedProviders {
 		wg.Add(1)
 		target := strings.ToLower(auth)
-		endpoint := fmt.Sprintf("http://%s:8080/agent/v1/hflShutdownRequest/%s", url, target)
+		endpoint := fmt.Sprintf("http://%s:8080/agent/v1/hflTrainRequest/%s", url, target)
 
-		go func(auth string, endpoint string) {
+		go func(auth, endpoint string) {
 			logger.Sugar().Infof("-- Sending shutdown request to -> %s ", auth)
 			sendData(endpoint, dataRequestJson)
 			wg.Done()

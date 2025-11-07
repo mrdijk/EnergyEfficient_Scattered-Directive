@@ -16,11 +16,11 @@ def get_logs():
     v1 = client.CoreV1Api()
 
     # Read the results from the logs of the api-gateway
-    namespace='api-gateway'
+    namespace = 'api-gateway'
     container_name = 'api-gateway'
     pod_name = 'api-gateway-6bf76d45b7-vjkc8'
 
-    logs = v1.read_namespaced_pod_log(name=pod_name, namespace=namespace, container=container_name)
+    logs = v1.read_namespaced_pod_log(name=pod_name, namespace=namespace, container=container_name, since_seconds=500)
     # print(logs)
     
     return logs.splitlines()

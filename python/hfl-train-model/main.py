@@ -91,30 +91,28 @@ def deserialise_array(string, hook=None):
 class ServerModel(nn.Module):
     def __init__(self, input_size):
         super(ServerModel, self).__init__()
-        self.fc1 = nn.Linear(input_size, 12)
-        self.fc2 = nn.Linear(12,1)
-        self.sigmoid = nn.Sigmoid()
+        self.fc1 = nn.Linear(input_size, 32)
+        self.relu = nn.ReLU()
+        self.fc2 = nn.Linear(32, 1)
 
     def forward(self, x):
-        x = self.fc1(x)
-        x = self.fc2(x)
-        return self.sigmoid(x)
-
+        x = self.relu(self.fc1(x))
+        return self.fc2(x) 
 
 class HFLServer:
+    """
+    Horizontal Federated Learning Server:
+    - Aggregates all client models
+    - Averages all model parameters
+    - Evaluates aggregates model performance 
+    - Sends back the averaged model parameters to the clients
+    """
     def __init__(self, data):
-        self.device = "cpu"
-
-        # if "Survived" not in data.columns:
-        #     raise ValueError("Dataset must contain 'Survived' column.")
-
+        self.data = torch.tensor(data.drop("Survived", axis=1).values).float() 
         self.labels = torch.tensor(data["Survived"].values).float().unsqueeze(1)
-        self.data = torch.tensor(
-            data.drop("Survived", axis=1).values
-        ).float()
-        
         self.model = ServerModel(self.data.shape[1])
-
+        self.criterion = nn.BCEWithLogitsLoss()
+        self.optimizer = optim.Adam(self.model.parameters(), lr=0.001)
 
     def aggregate_fit(self, client_updates):
         """
@@ -125,7 +123,7 @@ class HFLServer:
             total_samples = sum(update["num_samples"] for update in client_updates)
             keys = [k for k, _ in client_updates[0]["params"]]
             accum = {k: np.zeros_like(client_updates[0]["params"][i][1], dtype=np.float64)
-                     for i, k in enumerate(keys)}
+                        for i, k in enumerate(keys)}
 
             for update in client_updates:
                 weight = update["num_samples"] / total_samples
@@ -135,22 +133,29 @@ class HFLServer:
             averaged = [(k, accum[k].astype(np.float32)) for k in keys]
             state_dict = OrderedDict()
             for k, nd in averaged:
-                state_dict[k] = torch.from_numpy(nd).to(self.device)
+                state_dict[k] = torch.from_numpy(nd)
             self.model.load_state_dict(state_dict)
 
         except Exception as e:
             logger.error(f"FedAvg aggregation failed: {e}")
             raise e
 
+        logger.info("FedAvg Succesful, evaluating results")
+
         # Evaluate accuracy on server dataset
+        self.model.eval()
         with torch.no_grad():
-            self.model.eval()
-            preds = (self.model(self.data) > 0.5).float()
-            acc = (preds == self.labels).sum().item() / len(self.labels) * 100
+            logits = self.model(self.data)
+            loss = self.criterion(logits, self.labels)
+            preds = torch.sigmoid(logits)
+            predicted = (preds > 0.5)
+            accuracy = (predicted == self.labels).sum().item() / len(self.labels)
 
         data = Struct()
-        data.update({"accuracy": acc})
-        logger.info(f"Aggregated global model accuracy: {acc:.2f}%")
+        data.update({"accuracy": accuracy})
+        # data.update({"loss": loss.item()})
+        logger.info(f"Predicted survivors: {(predicted.sum().item())} out of 340 actual survivors")
+        logger.info(f"Aggregated global model accuracy: {accuracy:.2f}% and loss: {loss:.2f}")
 
         # Serialize averaged model parameters for clients
         np_params = []
@@ -161,7 +166,6 @@ class HFLServer:
             })
         data.update({"global_params": json.dumps(np_params)})
         return data
-
 
 def handleAggregateRequest(msComm):
     global ms_config
