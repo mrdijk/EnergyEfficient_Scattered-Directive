@@ -209,7 +209,7 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication,
                 hfl_client.train_local(epochs=epochs)
                 model_update_json = hfl_client.get_model_update()
                 acc = hfl_client.evaluate()
-                logger.info(f"Local modal accuracy is {acc:.2f}%")
+                logger.info(f"Local modal accuracy is {acc:.2f}")
 
                 data = Struct()
                 data.update({"model_update": model_update_json})

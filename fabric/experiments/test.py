@@ -1,34 +1,31 @@
-import pandas as pd
-from google.protobuf.struct_pb2 import Struct, Value, ListValue
+import requests
 
-def dataframe_to_protobuf(df):
-    # Convert the DataFrame to a dictionary of lists (one for each column)
-    data_dict = df.to_dict(orient='list')
+HEADERS_APPROVAL = {
+    "Content-Type": "application/json",
+    # Add specific host for this for FABRIC Kubernetes environment
+    "Host": "api-gateway.api-gateway.svc.cluster.local"
+}
 
-    # Convert the dictionary to a Struct
-    data_struct = Struct()
+HFL_REQUEST = {
+    "type": "hflTrainModelRequest",
+    "user": {
+        "id": "1234",
+        "userName": "maurits.dijk@student.uva.nl@student.uva.nl"
+    },
+    "dataProviders": ["server", "clientone", "clienttwo", "clientthree"],
+    "data_request": {
+        "type": "hflTrainModelRequest",
+        "data": {},
+        "requestMetadata": {}
+    }
+}
 
-    # Iterate over the dictionary and add each value to the Struct
-    for key, values in data_dict.items():
-        # Pack each item of the list into a Value object
-        value_list = [Value(string_value=str(item)) for item in values]
-        # Pack these Value objects into a ListValue
-        list_value = ListValue(values=value_list)
-        # Add the ListValue to the Struct
-        data_struct.fields[key].CopyFrom(Value(list_value=list_value))
-
-    # Create the metadata
-    # Infer the data types of each column
-    data_types = df.dtypes.apply(lambda x: x.name).to_dict()
-    # Convert the data types to string values
-    metadata = {k: str(v) for k, v in data_types.items()}
-
-    return data_struct, metadata
+NODE_IP = "10.139.1.2"
+NODEPORT_BASE_URL = f"http://{NODE_IP}:31141"
+APPROVAL_URL = f"{NODEPORT_BASE_URL}/api/v1/requestApproval"
 
 if __name__ == "__main__":
-    test_csv = '/home/maurits/EnergyEfficiencient_FL/energy-efficiency/experiments/data/baseline_ComputeToData_250124-1654/exp_0/full_experiment_results.csv'
-    result = pd.read_csv(test_csv)
-    data, metadata = dataframe_to_protobuf(result)
-   
-    print('data: ', data)
-    print('metadata: ', metadata)
+    hfl_request_body = HFL_REQUEST
+    headers = HEADERS_APPROVAL.copy()
+    requests_url = APPROVAL_URL
+    requests.post(requests_url, json=hfl_request_body, headers=headers)

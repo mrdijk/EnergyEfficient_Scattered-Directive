@@ -43,33 +43,33 @@ def parse_logs(lines):
         ts_raw = float(m.group("ts"))
         acc = float(m.group("acc"))
         rnd = int(m.group("round"))
-        kind = "Intermediate" if "Intermediate" in line else "Final"
+        # kind = "Intermediate" if "Intermediate" in line else "Final"
 
         # Convert timestamp
         sec = int(ts_raw)
         ms = int((ts_raw - sec) * 1000)
-        dt = datetime.fromtimestamp(sec, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-        readable = f"{dt}.{ms:03d}"
+        # dt = datetime.fromtimestamp(sec, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        # readable = f"{dt}.{ms:03d}"
 
         if first_ts is None:
             first_ts = ts_raw
         rel = ts_raw - first_ts
 
-        results.append((readable, f"{rel:.2f}", rnd, kind, acc))
+        results.append((f"{rel:.2f}", rnd, acc))
 
     return results
 
-def save_accuracies(accuracies: list[str], output_dir: str, exp_cycles):
+def save_accuracies(accuracies: list[str], output_dir: str):
     print("Saving accuracies to file...")
     
     # Ensure the output directory exists
-    output_dir_exp = os.path.join(output_dir, f'exp_{(exp_cycles)}')
-    accuracies_file = os.path.join(output_dir_exp, "accuracies.txt")
-    os.makedirs(output_dir_exp, exist_ok=True)
+    # output_dir_exp = os.path.join(output_dir, f'exp_{(exp_cycles)}')
+    accuracies_file = os.path.join(output_dir, "accuracies.txt")
+    os.makedirs(output_dir, exist_ok=True)
     
     with open( accuracies_file, "w") as f:
         f.write("# Accuracy results\n")
-        f.write("# Columns: [time_readable] [time_relative_sec] [round] [type] [accuracy]\n")
+        f.write("# Columns: [time_relative_sec] [round] [accuracy]\n")
         for row in accuracies:
             f.write("  ".join(map(str, row)) + "\n")
 
@@ -95,5 +95,5 @@ if __name__ == "__main__":
     print(f"Logs: {logs}")
     accuracies = parse_logs(logs)
     print(f"Accuracies: {accuracies}")
-    save_accuracies(accuracies, output_dir, exp_cycles)
-    print(f"✅ Saved accuracy logs to {output_dir}")
+    save_accuracies(accuracies, output_dir)
+    print(f"Saved accuracy logs to {output_dir}")

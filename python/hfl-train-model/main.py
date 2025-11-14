@@ -155,7 +155,7 @@ class HFLServer:
         data.update({"accuracy": accuracy})
         # data.update({"loss": loss.item()})
         logger.info(f"Predicted survivors: {(predicted.sum().item())} out of 340 actual survivors")
-        logger.info(f"Aggregated global model accuracy: {accuracy:.2f}% and loss: {loss:.2f}")
+        logger.info(f"Aggregated global model accuracy: {accuracy:.2f} and loss: {loss:.2f}")
 
         # Serialize averaged model parameters for clients
         np_params = []

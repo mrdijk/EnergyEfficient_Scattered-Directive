@@ -230,11 +230,11 @@ updateList := []string{}
 	}
 
 	accuracy := serverResponse.Data.GetFields()["accuracy"].GetNumberValue()
-	loss := serverResponse.Data.GetFields()["loss"].GetNumberValue()
+	// loss := serverResponse.Data.GetFields()["loss"].GetNumberValue()
 	globalParams := serverResponse.Data.GetFields()["global_params"].GetStringValue()
 
 
-	logger.Sugar().Infof("Loss of global model: %f", loss)
+	// logger.Sugar().Infof("Loss of global model: %f", loss)
 	// Send the new global model to all clients 
 	for auth, url := range clients {
 		wg.Add(1)
