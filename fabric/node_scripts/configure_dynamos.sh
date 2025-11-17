@@ -5,7 +5,7 @@
 IFS=',' read -r -a agents <<< "$1"
 IFS=',' read -r -a thirdparties <<< "$2"
 
-cd DYNAMOS
+cd EnergyEfficient_Scattered-Directive
 
 echo "Adding agents..."
 for agent in "${agents[@]}"

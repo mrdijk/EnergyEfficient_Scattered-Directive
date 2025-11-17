@@ -34,7 +34,7 @@ def get_energy_consumption():
             container_name = result['metric'][constants.PROM_KEPLER_CONTAINER_LABEL]
             # Extract the actual result (value[0] is the timestamp)
             value = result['value'][1]
-            energy_data[container_name] = value
+            energy_data[container_name] = float(value)
         # Return result
         return energy_data
 
@@ -51,9 +51,10 @@ def get_logs():
     # Read the results from the logs of the api-gateway
     namespace='api-gateway'
     container_name = 'api-gateway'
+    # Get the name of the current api-gateway pod
     pod_name = subprocess.getoutput(r'kubectl get pods -n api-gateway | grep api-gateway | sed "s/^\(api-gateway[a-zA-Z0-9-]\+\).*/\1/"')
 
-    logs = v1.read_namespaced_pod_log(name=pod_name, namespace=namespace, container=container_name)
+    logs = v1.read_namespaced_pod_log(name=pod_name, namespace=namespace, container=container_name, since_seconds=constants.ACTIVE_PERIOD)
     # print(logs)
 
     return logs.splitlines()
@@ -103,7 +104,7 @@ def save_accuracies(accuracies: list[str], output_dir: str):
             f.write("  ".join(map(str, row)) + "\n")
 
 # Main function to execute the experiment
-def run_experiment(output_dir, exp_clients):
+def run_experiment(output_dir, exp_clients, exp_cycles):
     results = []
     requests_url = constants.APPROVAL_URL
 
@@ -116,7 +117,6 @@ def run_experiment(output_dir, exp_clients):
     print(f"Idle Energy: {idle_energy} (in J)")
 
     # Phase 2: Active period
-    runs = {}
     # Record the start time of the active period
     active_start_time = time.time()
 
@@ -124,14 +124,23 @@ def run_experiment(output_dir, exp_clients):
     hfl_request_body = constants.HFL_REQUEST
     headers = constants.HEADERS_APPROVAL.copy()
     # Select number of nodes from data providers (+1 for the server)
-    hfl_request_body["dataProviders"] = constants.DATA_PROVIDERS[:(exp_clients+1)]
+    print(f"Using the followiong clients for training {constants.DATA_PROVIDERS[1:exp_clients+1]}")
+    hfl_request_body["dataProviders"] = constants.DATA_PROVIDERS[:exp_clients+1]
+    hfl_request_body["data_request"]["data"]["cycles"] = exp_cycles
 
     # Execute HFL request, using specific headers created for FABRIC
-    r = requests.post(requests_url, json=hfl_request_body, headers=headers)
-    print(r)
+    requests.post(requests_url, json=hfl_request_body, headers=headers)
 
-    print("Wait for HFL to run")
-    time.sleep(120)
+    print("Waiting for HFL to run")
+    print("Waiting 120 seconds")
+    time.sleep(30)
+    print("Waiting 90 seconds")
+    time.sleep(30)
+    print("Waiting 60 seconds")
+    time.sleep(30)
+    print("Waiting 30 seconds")
+    time.sleep(30)
+    # time.sleep(120)
 
     # Get the results from the logs of the api-gateway
     logs = get_logs()
@@ -164,11 +173,16 @@ def run_experiment(output_dir, exp_clients):
     active_energy = get_energy_consumption()
     print(f"Active Energy: {active_energy} (in J)")
 
+    energy_difference = {}
+    for container, value in active_energy.items():
+        energy_difference[container] = value - idle_energy[container]
+    
     # Extract results for this run
     results = {
         # "runs": runs,
         "idle_energy": idle_energy,
-        "active_energy": active_energy
+        "active_energy": active_energy,
+        "difference": energy_difference
     }
 
     # Save experiment results to files
@@ -233,6 +247,9 @@ def save_results(results, output_dir):
         file.write("\nActive Energy:\n")
         for container, value in results["active_energy"].items():
             file.write(f"{container}: {value}\n")
+        file.write("\nDifference in Energy:\n")
+        for container, value in results["difference"].item():
+            file.write(f"{container}: {value}\n")
     # Output file location that is clickable for the user
     print(f"Full energy values saved to {os.path.join(os.getcwd(), full_energy_file)}")
 
@@ -246,8 +263,8 @@ def format_timestamp():
 if __name__ == "__main__":
     # Add argument parser
     parser = argparse.ArgumentParser(description="Run energy efficiency experiment")
-    parser.add_argument("exp_clients", type=int, help="The number of expected clients')")
-    parser.add_argument("exp_cycles", type=int, help="The number of rounds that are performed")
+    parser.add_argument("exp_clients", type=int, help="The number of expected clients")
+    parser.add_argument("exp_cycles", type=int, help="The number of training rounds performed")
     # Parse args
     args = parser.parse_args()
 
@@ -256,4 +273,4 @@ if __name__ == "__main__":
     output_dir = os.path.join('data', f'{exp_clients}_{exp_cycles}_{format_timestamp()}')
 
     print(f"\nStarting experiment")
-    run_experiment(output_dir, exp_clients)
+    run_experiment(output_dir, exp_clients, exp_cycles)

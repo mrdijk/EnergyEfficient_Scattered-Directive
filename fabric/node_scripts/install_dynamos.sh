@@ -29,7 +29,7 @@ else
   tar -zxvf helm-${VERSION}-linux-amd64.tar.gz
   sudo mv linux-amd64/helm /usr/local/bin/helm
   rm -rf linux-amd64 helm-${VERSION}-linux-amd64.tar.gz
-  echo "Helm manually installed, version:"https://linkerd.io/2.18/getting-started/
+  echo "Helm manually installed, version:"
   helm version
 fi
 
@@ -39,6 +39,7 @@ function addPathExport () {
 }
 
 # Install CLI
+export LINKERD2_VERSION=edge-25.8.1
 curl --proto '=https' --tlsv1.2 -sSfL https://run.linkerd.io/install-edge | sh
 
 # Add Linkerd to PATH
@@ -71,67 +72,4 @@ brew install etcd
 
 echo -e "127.0.0.1 api-gateway.api-gateway.svc.cluster.local" | sudo tee -a /etc/hosts
 
-git clone https://github.com/Javernus/DYNAMOS.git
-
-# curl -H "Host: api-gateway.api-gateway.svc.cluster.local" http://10.145.6.3:31813/api/v1/requestApproval \
-# --header 'Content-Type: application/json' \
-# --data-raw '{
-#     "type": "sqlDataRequest",
-#     "user": {
-#         "id": "12324",
-#         "userName": "jorrit.stutterheim@cloudnation.nl"
-#     },
-#     "dataProviders": ["VU"],
-#     "data_request": {
-#         "type": "sqlDataRequest",
-#         "query" : "SELECT * FROM Personen p JOIN Aanstellingen s LIMIT 1000",
-#         "algorithm" : "average",
-#         "options" : {
-#             "graph" : false,
-#             "aggregate": false
-#         },
-#         "requestMetadata": {}
-#     }
-# }'
-
-# curl -H "Host: api-gateway.api-gateway.svc.cluster.local" http://10.145.6.3:31813/api/v1/requestApproval \
-# --header 'Content-Type: application/json' \
-# --data-raw '{
-#     "type": "vflTrainRequest",
-#     "user": {
-#         "id": "1234",
-#         "userName": "jake.jongejans@student.uva.nl"
-#     },
-#     "dataProviders": ["alpha"],
-#     "data_request": {
-#         "type": "vflTrainRequest",
-#         "data": {
-#           "learning_rate": 0.05
-#         },
-#         "requestMetadata": {}
-#     }
-# }'
-
-# DYNAMOS_PORT=$(kubectl get svc -n ingress | grep "nginx-nginx-ingress-controller" | sed "s/.*80:\([0-9]*\)\/TCP.*/\1/")
-# DYNAMOS_IP=$(kubectl get nodes -o wide | grep dynamos | sed "s/.*\s\([0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\).*/\1/")
-
-# curl -H "Host: api-gateway.api-gateway.svc.cluster.local" http://$DYNAMOS_IP:$DYNAMOS_PORT/api/v1/requestApproval \
-# --header 'Content-Type: application/json' \
-# --data-raw '{
-#     "type": "vflTrainModelRequest",
-#     "user": {
-#         "id": "1234",
-#         "userName": "jake.jongejans@student.uva.nl"
-#     },
-#     "dataProviders": ["alpha", "enigma", "omnia", "zenith"],
-#     "data_request": {
-#         "type": "vflTrainModelRequest",
-#         "data": {
-#           "learning_rate": 0.05,
-#           "cycles": 50
-#         },
-# "requestMetadata": {}
-#     }
-# }'
-
-}
+git clone https://github.com/mrdijk/EnergyEfficient_Scattered-Directive.git

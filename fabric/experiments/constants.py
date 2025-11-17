@@ -16,21 +16,13 @@ PROM_CONTAINERS = "{container_name=~\"kernel_processes|system_processes|client(o
 PROM_KEPLER_ENERGY_METRIC = "kepler_container_joules_total"
 PROM_KEPLER_CONTAINER_LABEL = "container_name"
 PROM_ENERGY_QUERY_TOTAL = f"sum({PROM_KEPLER_ENERGY_METRIC}{PROM_CONTAINERS}) by ({PROM_KEPLER_CONTAINER_LABEL})"
-PROM_ENERGY_QUERY_RANGE = f"sum(increase({PROM_KEPLER_ENERGY_METRIC}{PROM_CONTAINERS}[2m])) by ({PROM_KEPLER_CONTAINER_LABEL})"
+PROM_ENERGY_QUERY_RANGE = f"sum(increase({PROM_KEPLER_ENERGY_METRIC}{PROM_CONTAINERS}[3m])) by ({PROM_KEPLER_CONTAINER_LABEL})"
 
 # Experiment configurations
-NUM_EXP_ACTIONS = 7  # Number of actions per experiment
 IDLE_PERIOD = 120  # Idle period in seconds
-ACTIVE_PERIOD = 120  # Active period in seconds
-ROUNDS = 10
-LEARNING_RATE = 0.01
+ACTIVE_PERIOD = 180  # Active period in seconds
+ROUNDS = 10 # Defaults number of training rounds
 DATA_PROVIDERS =  ["server", "clientone", "clienttwo", "clientthree"]
-
-HEADERS = {
-    "Content-Type": "application/json",
-    # Access token required for data requests in DYNAMOS
-    # "Authorization": "bearer 1234"
-}
 
 # Add specific FABRIC Kubernetes setup for these urls
 APPROVAL_URL = f"{NODEPORT_BASE_URL}/api/v1/requestApproval"
