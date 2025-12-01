@@ -10,6 +10,7 @@ from google.protobuf.struct_pb2 import Struct
 from dynamos.ms_init import NewConfiguration
 from dynamos.signal_flow import signal_continuation, signal_wait
 from dynamos.logger import InitLogger
+from datetime import datetime
 import rabbitMQ_pb2 as rabbitTypes
 
 from google.protobuf.empty_pb2 import Empty
@@ -89,7 +90,7 @@ def deserialise_array(string, hook=None):
     return dataArray
 
 class ServerModel(nn.Module):
-    def __init__(self, input_size):
+    def __init__(self, input_size, device="cpu"):
         super(ServerModel, self).__init__()
         self.fc1 = nn.Linear(input_size, 32)
         self.relu = nn.ReLU()
@@ -112,7 +113,7 @@ class HFLServer:
         self.labels = torch.tensor(data["Survived"].values).float().unsqueeze(1)
         self.model = ServerModel(self.data.shape[1])
         self.criterion = nn.BCEWithLogitsLoss()
-        self.optimizer = optim.Adam(self.model.parameters(), lr=0.001)
+        self.optimizer = optim.Adam(self.model.parameters(), lr=0.01)
 
     def aggregate_fit(self, client_updates):
         """
@@ -189,8 +190,13 @@ def handleAggregateRequest(msComm):
         return
 
     logger.info("Performing FedAvg aggregation from client updates.")
+    start_agg = datetime.now().strftime("%H%M%S")
+    logger.info(f"Start aggregation: {start_agg}")
     agg_result = hfl_server.aggregate_fit(client_updates)
-
+    logger.info(f"Done with aggregation: {end_agg}")
+    
+    timestamp = datetime.now().strftime("%H%M%S")
+    logger.info(f"{timestamp}: Sending aggregated results")
     ms_config.next_client.ms_comm.send_data(msComm, agg_result, {})
 
 
@@ -221,7 +227,8 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication,
             ms_config.next_client.ms_comm.send_data(msComm, msComm.data, {})
     else:
         if request.type == "hflAggregateRequest":
-            logger.info("Received hflAggregateRequest.")
+            timestamp = datetime.now().strftime("%H%M%S")
+            logger.info(f"{timestamp}: Received hflAggregateRequest.")
             handleAggregateRequest(msComm)
 
         elif request.type == "hflPingRequest":

@@ -11,6 +11,7 @@ from google.protobuf.struct_pb2 import Struct
 from dynamos.ms_init import NewConfiguration
 from dynamos.signal_flow import signal_continuation, signal_wait
 from dynamos.logger import InitLogger
+from datetime import datetime
 import rabbitMQ_pb2 as rabbitTypes
 
 from google.protobuf.empty_pb2 import Empty
@@ -200,19 +201,26 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication,
         # Client side
         if request is not None:
             if request.type == "hflTrainRequest":
-                logger.info("Received hflTrainRequest (client training).")
+                timestamp = datetime.now().strftime("%H%M%S")
+                logger.info(f"{timestamp}: Received hflTrainRequest (client training).")
                 try:
                     epochs = int(request.data.get("epochs").number_value) if "epochs" in request.data else 1
                 except Exception:
                     epochs = 1
-
+                
+                start_local_training = datetime.now().strftime("%H%M%S")
+                logger.info(f"Start training: {start_local_training}")
                 hfl_client.train_local(epochs=epochs)
+                end_local_training = datetime.now().strftime("%H%M%S")
+                logger.info(f"End training: {end_local_training}")
                 model_update_json = hfl_client.get_model_update()
                 acc = hfl_client.evaluate()
                 logger.info(f"Local modal accuracy is {acc:.2f}")
 
                 data = Struct()
                 data.update({"model_update": model_update_json})
+                send_time = datetime.now().strftime("%H%M%S")
+                logger.info(f"{send_time}: Sending model updates")
                 ms_config.next_client.ms_comm.send_data(msComm, data, {})
 
             elif request.type == "hflLoadGlobalModel":

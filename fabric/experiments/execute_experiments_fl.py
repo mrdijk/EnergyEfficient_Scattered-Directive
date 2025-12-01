@@ -132,47 +132,38 @@ def run_experiment(output_dir, exp_clients, exp_cycles):
     requests.post(requests_url, json=hfl_request_body, headers=headers)
 
     print("Waiting for HFL to run")
-    print("Waiting 120 seconds")
-    time.sleep(30)
-    print("Waiting 90 seconds")
-    time.sleep(30)
-    print("Waiting 60 seconds")
-    time.sleep(30)
+    # print("Waiting 120 seconds")
+    # time.sleep(30)
+    # print("Waiting 90 seconds")
+    # time.sleep(30)
+    # print("Waiting 60 seconds")
+    # time.sleep(30)
     print("Waiting 30 seconds")
     time.sleep(30)
     # time.sleep(120)
+
+    # Measure energy after active period (end_active) after the active period
+    active_energy = get_energy_consumption()
+    print(f"Active Energy: {active_energy} (in J)")
+
+    response = requests.get(
+        f"{constants.PROMETHEUS_URL}/api/v1/query",
+        params={
+            # Use range query, as we found that this was the most reliable in our thesis
+            "query": "increase(kepler_node_joules_total[2m])-(sum(increase(kepler_container_joules_total[2m])) + sum(increase(kepler_system_joules_total[2m])) + sum(increase(kepler_kernel_joules_total[2m])))"
+        },
+    )
+    # Parse the response JSON
+    response_json = response.json()
+    # print(f"Prometheus response status code: {response.status_code}")
+    print(f"Prometheus response: {response_json}")
 
     # Get the results from the logs of the api-gateway
     logs = get_logs()
     accuracies = parse_logs(logs)
     save_accuracies(accuracies, output_dir)
     print(f"Saved accuracy logs to {output_dir}")
-
-    # Save run data
-    # runs[run] = {
-    #     "appr_status_code": status_code_approval,
-    #     # "appr_exec_time": execution_time_approval,
-    #     "data_status_code": status_code_data_request,
-    #     "data_req_exec_time": execution_time_data_request,
-    # }
-    # Apply interval between requests (if not last run of sequence) 
-    # if (run + 1) != constants.NUM_EXP_ACTIONS:
-    #     print("Waiting before next action...")
-    #     time.sleep(8)
-
-
-    # Before measuring the active energy, make sure the active period has passed for equal comparisons
-    elapsed_time = time.time() - active_start_time
-    # Add a few seconds to make sure a new Prometheus scrape is present
-    remaining_time = (constants.ACTIVE_PERIOD + 2) - elapsed_time
-    # If still time left to wait, sleep until the 2 minutes have passed
-    if remaining_time > 0:
-        print(f"Waiting for the remaining {remaining_time} seconds...")
-        time.sleep(remaining_time)
-    # Measure energy after active period (end_active) after the active period
-    active_energy = get_energy_consumption()
-    print(f"Active Energy: {active_energy} (in J)")
-
+    
     energy_difference = {}
     for container, value in active_energy.items():
         energy_difference[container] = value - idle_energy[container]

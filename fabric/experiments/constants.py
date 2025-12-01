@@ -12,16 +12,16 @@ NODEPORT_BASE_URL = f"http://{NODE_IP}:31141"
 # Can be fetched with the following command to extract the NodePort from <LocalNodePort>:<NodePort>/TCP with: kubectl get svc prometheus-kube-prometheus-prometheus -n monitoring
 # See fabric/dynamos/DYNAMOS_setup.ipynb notebook for an example and more explanation on this.
 PROMETHEUS_URL = f"http://{NODE_IP}:32535"
-PROM_CONTAINERS = "{container_name=~\"kernel_processes|system_processes|client(one|two|three)|server|sql.*|policy.*|orchestrator|sidecar|rabbitmq|api-gateway\"}"
+# PROM_CONTAINERS = "{container_name=~\"kernel_processes|system_processes|client(one|two|three)|server|sql.*|policy.*|orchestrator|sidecar|rabbitmq|api-gateway\"}"
+PROM_CONTAINER_NS = "{container_namespace=~\"client(one|two|three)|server|policy.*|orchestrator|api-gateway\"}"
 PROM_KEPLER_ENERGY_METRIC = "kepler_container_joules_total"
 PROM_KEPLER_CONTAINER_LABEL = "container_name"
-PROM_ENERGY_QUERY_TOTAL = f"sum({PROM_KEPLER_ENERGY_METRIC}{PROM_CONTAINERS}) by ({PROM_KEPLER_CONTAINER_LABEL})"
-PROM_ENERGY_QUERY_RANGE = f"sum(increase({PROM_KEPLER_ENERGY_METRIC}{PROM_CONTAINERS}[3m])) by ({PROM_KEPLER_CONTAINER_LABEL})"
+PROM_ENERGY_QUERY_TOTAL = f"sum({PROM_KEPLER_ENERGY_METRIC}{PROM_CONTAINER_NS}) by ({PROM_KEPLER_CONTAINER_LABEL})"
+PROM_ENERGY_QUERY_RANGE = f"sum(increase({PROM_KEPLER_ENERGY_METRIC}{PROM_CONTAINER_NS}[2m])) by ({PROM_KEPLER_CONTAINER_LABEL})"
 
 # Experiment configurations
 IDLE_PERIOD = 120  # Idle period in seconds
-ACTIVE_PERIOD = 180  # Active period in seconds
-ROUNDS = 10 # Defaults number of training rounds
+ACTIVE_PERIOD = 120  # Active period in seconds
 DATA_PROVIDERS =  ["server", "clientone", "clienttwo", "clientthree"]
 
 # Add specific FABRIC Kubernetes setup for these urls
