@@ -13,42 +13,263 @@
     "archetypes": ["computeToData"]
   },
   {
-    "name": "clientone",
+    "name": "client1",
     "relations": {
       "maurits.dijk@student.uva.nl": {
         "ID": "GUID",
         "requestTypes": ["hflTrainRequest"],
         "allowedArchetypes": ["computeToData"],
-        "allowedComputeProviders": ["clientone"]
+        "allowedComputeProviders": ["client1"]
       }
     },
-    "computeProviders": ["clientone"],
+    "computeProviders": ["client1"],
     "archetypes": ["computeToData"]
   },
   {
-    "name": "clienttwo",
+    "name": "client2",
     "relations": {
       "maurits.dijk@student.uva.nl": {
         "ID": "GUID",
         "requestTypes": ["hflTrainRequest"],
         "allowedArchetypes": ["computeToData"],
-        "allowedComputeProviders": ["clienttwo"]
+        "allowedComputeProviders": ["client2"]
       }
     },
-    "computeProviders": ["clienttwo"],
+    "computeProviders": ["client2"],
     "archetypes": ["computeToData"]
   },
   {
-    "name": "clientthree",
+    "name": "client3",
     "relations": {
       "maurits.dijk@student.uva.nl": {
         "ID": "GUID",
         "requestTypes": ["hflTrainRequest"],
         "allowedArchetypes": ["computeToData"],
-        "allowedComputeProviders": ["clientthree"]
+        "allowedComputeProviders": ["client3"]
       }
     },
-    "computeProviders": ["clientthree"],
+    "computeProviders": ["client3"],
+    "archetypes": ["computeToData"]
+  },
+  {
+    "name": "client4",
+    "relations": {
+      "maurits.dijk@student.uva.nl": {
+        "ID": "GUID",
+        "requestTypes": ["hflTrainRequest"],
+        "allowedArchetypes": ["computeToData"],
+        "allowedComputeProviders": ["client4"]
+      }
+    },
+    "computeProviders": ["client4"],
+    "archetypes": ["computeToData"]
+  },
+  {
+    "name": "client5",
+    "relations": {
+      "maurits.dijk@student.uva.nl": {
+        "ID": "GUID",
+        "requestTypes": ["hflTrainRequest"],
+        "allowedArchetypes": ["computeToData"],
+        "allowedComputeProviders": ["client5"]
+      }
+    },
+    "computeProviders": ["client5"],
+    "archetypes": ["computeToData"]
+  },
+  {
+    "name": "client6",
+    "relations": {
+      "maurits.dijk@student.uva.nl": {
+        "ID": "GUID",
+        "requestTypes": ["hflTrainRequest"],
+        "allowedArchetypes": ["computeToData"],
+        "allowedComputeProviders": ["client6"]
+      }
+    },
+    "computeProviders": ["client6"],
+    "archetypes": ["computeToData"]
+  },
+  {
+    "name": "client7",
+    "relations": {
+      "maurits.dijk@student.uva.nl": {
+        "ID": "GUID",
+        "requestTypes": ["hflTrainRequest"],
+        "allowedArchetypes": ["computeToData"],
+        "allowedComputeProviders": ["client7"]
+      }
+    },
+    "computeProviders": ["client7"],
+    "archetypes": ["computeToData"]
+  },
+  {
+    "name": "client8",
+    "relations": {
+      "maurits.dijk@student.uva.nl": {
+        "ID": "GUID",
+        "requestTypes": ["hflTrainRequest"],
+        "allowedArchetypes": ["computeToData"],
+        "allowedComputeProviders": ["client8"]
+      }
+    },
+    "computeProviders": ["client8"],
+    "archetypes": ["computeToData"]
+  },
+  {
+    "name": "client9",
+    "relations": {
+      "maurits.dijk@student.uva.nl": {
+        "ID": "GUID",
+        "requestTypes": ["hflTrainRequest"],
+        "allowedArchetypes": ["computeToData"],
+        "allowedComputeProviders": ["client9"]
+      }
+    },
+    "computeProviders": ["client9"],
+    "archetypes": ["computeToData"]
+  },
+  {
+    "name": "client10",
+    "relations": {
+      "maurits.dijk@student.uva.nl": {
+        "ID": "GUID",
+        "requestTypes": ["hflTrainRequest"],
+        "allowedArchetypes": ["computeToData"],
+        "allowedComputeProviders": ["client10"]
+      }
+    },
+    "computeProviders": ["client10"],
+    "archetypes": ["computeToData"]
+  },
+  {
+    "name": "client11",
+    "relations": {
+      "maurits.dijk@student.uva.nl": {
+        "ID": "GUID",
+        "requestTypes": ["hflTrainRequest"],
+        "allowedArchetypes": ["computeToData"],
+        "allowedComputeProviders": ["client11"]
+      }
+    },
+    "computeProviders": ["client11"],
+    "archetypes": ["computeToData"]
+  },
+  {
+    "name": "client12",
+    "relations": {
+      "maurits.dijk@student.uva.nl": {
+        "ID": "GUID",
+        "requestTypes": ["hflTrainRequest"],
+        "allowedArchetypes": ["computeToData"],
+        "allowedComputeProviders": ["client12"]
+      }
+    },
+    "computeProviders": ["client12"],
+    "archetypes": ["computeToData"]
+  },
+  {
+    "name": "client13",
+    "relations": {
+      "maurits.dijk@student.uva.nl": {
+        "ID": "GUID",
+        "requestTypes": ["hflTrainRequest"],
+        "allowedArchetypes": ["computeToData"],
+        "allowedComputeProviders": ["client13"]
+      }
+    },
+    "computeProviders": ["client13"],
+    "archetypes": ["computeToData"]
+  },
+  {
+    "name": "client14",
+    "relations": {
+      "maurits.dijk@student.uva.nl": {
+        "ID": "GUID",
+        "requestTypes": ["hflTrainRequest"],
+        "allowedArchetypes": ["computeToData"],
+        "allowedComputeProviders": ["client14"]
+      }
+    },
+    "computeProviders": ["client14"],
+    "archetypes": ["computeToData"]
+  },
+  {
+    "name": "client15",
+    "relations": {
+      "maurits.dijk@student.uva.nl": {
+        "ID": "GUID",
+        "requestTypes": ["hflTrainRequest"],
+        "allowedArchetypes": ["computeToData"],
+        "allowedComputeProviders": ["client15"]
+      }
+    },
+    "computeProviders": ["client15"],
+    "archetypes": ["computeToData"]
+  },
+  {
+    "name": "client16",
+    "relations": {
+      "maurits.dijk@student.uva.nl": {
+        "ID": "GUID",
+        "requestTypes": ["hflTrainRequest"],
+        "allowedArchetypes": ["computeToData"],
+        "allowedComputeProviders": ["client16"]
+      }
+    },
+    "computeProviders": ["client16"],
+    "archetypes": ["computeToData"]
+  },
+  {
+    "name": "client17",
+    "relations": {
+      "maurits.dijk@student.uva.nl": {
+        "ID": "GUID",
+        "requestTypes": ["hflTrainRequest"],
+        "allowedArchetypes": ["computeToData"],
+        "allowedComputeProviders": ["client17"]
+      }
+    },
+    "computeProviders": ["client17"],
+    "archetypes": ["computeToData"]
+  },
+  {
+    "name": "client18",
+    "relations": {
+      "maurits.dijk@student.uva.nl": {
+        "ID": "GUID",
+        "requestTypes": ["hflTrainRequest"],
+        "allowedArchetypes": ["computeToData"],
+        "allowedComputeProviders": ["client18"]
+      }
+    },
+    "computeProviders": ["client18"],
+    "archetypes": ["computeToData"]
+  },
+  {
+    "name": "client19",
+    "relations": {
+      "maurits.dijk@student.uva.nl": {
+        "ID": "GUID",
+        "requestTypes": ["hflTrainRequest"],
+        "allowedArchetypes": ["computeToData"],
+        "allowedComputeProviders": ["client19"]
+      }
+    },
+    "computeProviders": ["client19"],
+    "archetypes": ["computeToData"]
+  },
+  {
+    "name": "client20",
+    "relations": {
+      "maurits.dijk@student.uva.nl": {
+        "ID": "GUID",
+        "requestTypes": ["hflTrainRequest"],
+        "allowedArchetypes": ["computeToData"],
+        "allowedComputeProviders": ["client20"]
+      }
+    },
+    "computeProviders": ["client20"],
     "archetypes": ["computeToData"]
   }
 ]
