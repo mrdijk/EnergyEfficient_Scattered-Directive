@@ -18,7 +18,7 @@ def get_logs():
     # Read the results from the logs of the api-gateway
     namespace = 'api-gateway'
     container_name = 'api-gateway'
-    pod_name = 'api-gateway-6bf76d45b7-vjkc8'
+    pod_name = 'api-gateway-6bf76d45b7-z72sk'
 
     logs = v1.read_namespaced_pod_log(name=pod_name, namespace=namespace, container=container_name, since_seconds=500)
     # print(logs)
@@ -48,8 +48,6 @@ def parse_logs(lines):
         # Convert timestamp
         sec = int(ts_raw)
         ms = int((ts_raw - sec) * 1000)
-        # dt = datetime.fromtimestamp(sec, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-        # readable = f"{dt}.{ms:03d}"
 
         if first_ts is None:
             first_ts = ts_raw

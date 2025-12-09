@@ -18,6 +18,7 @@ import microserviceCommunication_pb2 as msCommTypes
 import threading
 from opentelemetry.context.context import Context
 from collections import OrderedDict
+import time
 
 np.set_printoptions(threshold=sys.maxsize)
 
@@ -57,7 +58,7 @@ hfl_server = None
 
 def load_data(file_path):
     DATA_STEWARD_NAME = os.getenv("DATA_STEWARD_NAME").lower()
-    file_name = f"{file_path}/titanic_training.csv"
+    file_name = f"{file_path}/courseData.csv"
 
     if DATA_STEWARD_NAME == "":
         logger.error("DATA_STEWARD_NAME not set.")
@@ -109,11 +110,23 @@ class HFLServer:
     - Sends back the averaged model parameters to the clients
     """
     def __init__(self, data):
-        self.data = torch.tensor(data.drop("Survived", axis=1).values).float() 
-        self.labels = torch.tensor(data["Survived"].values).float().unsqueeze(1)
+        self.labels = torch.tensor((data["Completed"] == "Completed").astype(int).values).float().unsqueeze(1)
+        self.feature_cols = ['Age', 'Login_Frequency', 'Average_Session_Duration_Min', 'Video_Completion_Rate',
+									'Discussion_Participation', 'Time_Spent_Hours', 'Days_Since_Last_Login',
+									'Notifications_Checked', 'Peer_Interaction_Score', 'Assignments_Submitted',
+									'Assignments_Missed', 'Quiz_Attempts', 'Quiz_Score_Avg', 'Project_Grade',
+									'Progress_Percentage', 'Rewatch_Count', 'Payment_Amount', 'App_Usage_Percentage',
+									'Reminder_Emails_Clicked', 'Support_Tickets_Raised', 'Satisfaction_Rating',
+									'Course_Duration_Days', 'Instructor_Rating'] +  ['Gender_Encoded', 'Education_Encoded', 'Employment_Encoded',
+                                'Device_Encoded', 'Internet_Encoded', 'Level_Encoded',
+                                'Category_Encoded', 'Payment_Encoded']
+        
+        self.data = torch.tensor(data[self.feature_cols].values).float() 
         self.model = ServerModel(self.data.shape[1])
-        self.criterion = nn.BCEWithLogitsLoss()
-        self.optimizer = optim.Adam(self.model.parameters(), lr=0.01)
+        # Loss with class balancing
+        pos_weight = torch.tensor([len(self.labels) / sum(self.labels) - 1])  # roughly inverse class ratio
+        self.criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=0.01)
 
     def aggregate_fit(self, client_updates):
         """
@@ -190,13 +203,12 @@ def handleAggregateRequest(msComm):
         return
 
     logger.info("Performing FedAvg aggregation from client updates.")
-    start_agg = datetime.now().strftime("%H%M%S")
-    logger.info(f"Start aggregation: {start_agg}")
+    start = time.perf_counter()
+    time.perf_counter()
     agg_result = hfl_server.aggregate_fit(client_updates)
-    logger.info(f"Done with aggregation: {end_agg}")
-    
-    timestamp = datetime.now().strftime("%H%M%S")
-    logger.info(f"{timestamp}: Sending aggregated results")
+    agg_duration =  (time.perf_counter() - start) * 1000
+    logger.info(f"Aggregation duration: {agg_duration:.2f}ms")
+    agg_result.update({"ts": agg_duration:.2f})
     ms_config.next_client.ms_comm.send_data(msComm, agg_result, {})
 
 
@@ -227,7 +239,7 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication,
             ms_config.next_client.ms_comm.send_data(msComm, msComm.data, {})
     else:
         if request.type == "hflAggregateRequest":
-            timestamp = datetime.now().strftime("%H%M%S")
+            timestamp = datetime.now().strftime("%H:%M:%S")
             logger.info(f"{timestamp}: Received hflAggregateRequest.")
             handleAggregateRequest(msComm)
 

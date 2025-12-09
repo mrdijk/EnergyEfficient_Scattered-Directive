@@ -12,6 +12,7 @@ from dynamos.ms_init import NewConfiguration
 from dynamos.signal_flow import signal_continuation, signal_wait
 from dynamos.logger import InitLogger
 from datetime import datetime
+import time
 import rabbitMQ_pb2 as rabbitTypes
 
 from google.protobuf.empty_pb2 import Empty
@@ -46,15 +47,15 @@ ms_config = None
 
 def load_data(file_path):
     DATA_STEWARD_NAME = os.getenv("DATA_STEWARD_NAME").lower()
-    file_name = f"{file_path}/{DATA_STEWARD_NAME}Data.csv"
+    file_name = f"{file_path}/{DATA_STEWARD_NAME}.csv"
 
     if DATA_STEWARD_NAME == "":
         logger.error("DATA_STEWARD_NAME not set.")
-        file_name = f"{file_path}Data.csv"
+        file_name = f"{file_path}.csv"
 
     # Load correct dataset for the server
     if DATA_STEWARD_NAME == "server":
-        file_name = f"{file_path}/titanic_training.csv"
+        file_name = f"{file_path}/courseData.csv"
 
     try:
         data = pd.read_csv(file_name, delimiter=',')
@@ -102,10 +103,20 @@ class HFLClient:
     - can load the global model from the server
     """
     def __init__(self, data, learning_rate=0.01, model_state=None):
-        self.data = torch.tensor(data.drop("Survived", axis=1).values).float() 
-        self.labels = torch.tensor(data["Survived"].values).float().unsqueeze(1)
-
+        self.labels = torch.tensor((data["Completed"] == "Completed").astype(int).values).float().unsqueeze(1)
+        self.feature_cols = ['Age', 'Login_Frequency', 'Average_Session_Duration_Min', 'Video_Completion_Rate',
+									'Discussion_Participation', 'Time_Spent_Hours', 'Days_Since_Last_Login',
+									'Notifications_Checked', 'Peer_Interaction_Score', 'Assignments_Submitted',
+									'Assignments_Missed', 'Quiz_Attempts', 'Quiz_Score_Avg', 'Project_Grade',
+									'Progress_Percentage', 'Rewatch_Count', 'Payment_Amount', 'App_Usage_Percentage',
+									'Reminder_Emails_Clicked', 'Support_Tickets_Raised', 'Satisfaction_Rating',
+									'Course_Duration_Days', 'Instructor_Rating'] +  ['Gender_Encoded', 'Education_Encoded', 'Employment_Encoded',
+                                'Device_Encoded', 'Internet_Encoded', 'Level_Encoded',
+                                'Category_Encoded', 'Payment_Encoded']
+        
+        self.data = torch.tensor(data[self.feature_cols].values).float() 
         self.model = ClientModel(self.data.shape[1])
+        
         if model_state is not None:
             self.model.load_state_dict(model_state)
 
@@ -201,35 +212,38 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication,
         # Client side
         if request is not None:
             if request.type == "hflTrainRequest":
-                timestamp = datetime.now().strftime("%H%M%S")
-                logger.info(f"{timestamp}: Received hflTrainRequest (client training).")
+                start = time.perf_counter()
+                logger.info(f"{start}: Received hflTrainRequest (client training).")
                 try:
                     epochs = int(request.data.get("epochs").number_value) if "epochs" in request.data else 1
                 except Exception:
                     epochs = 1
                 
-                start_local_training = datetime.now().strftime("%H%M%S")
-                logger.info(f"Start training: {start_local_training}")
                 hfl_client.train_local(epochs=epochs)
-                end_local_training = datetime.now().strftime("%H%M%S")
-                logger.info(f"End training: {end_local_training}")
                 model_update_json = hfl_client.get_model_update()
                 acc = hfl_client.evaluate()
                 logger.info(f"Local modal accuracy is {acc:.2f}")
 
                 data = Struct()
                 data.update({"model_update": model_update_json})
-                send_time = datetime.now().strftime("%H%M%S")
-                logger.info(f"{send_time}: Sending model updates")
+                
+                training_time = (time.perf_counter() - start) * 1000
+                logger.info(f"Training time: {training_time:.2f}ms")
+                data.update({"ts": training_time:.2f})
                 ms_config.next_client.ms_comm.send_data(msComm, data, {})
 
             elif request.type == "hflLoadGlobalModel":
+                start = datetime.now()
                 logger.info("Received hflLoadGlobalModel (update local model).")
                 try:
                     global_params_json = request.data["global_params"].string_value
                     global_params = hfl_client.load_global_model(global_params_json)
                     data = Struct()
                     data.update({"global_params": global_params })
+                    end = datetime.now()
+                    loading_trime = (end- start).total_seconds() * 10**3
+                    logger.info(f"Loading time: {loading_trime}ms")
+                    data.update({"ts": loading_trime})
                 except Exception as e:
                     logger.error(f"Failed to load global model: {e}")
                     data = Struct()

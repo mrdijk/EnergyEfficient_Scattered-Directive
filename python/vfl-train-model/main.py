@@ -103,7 +103,9 @@ class ServerModel(nn.Module):
 
 class VFLServer():
     def __init__(self, data):
+        # Hardcoded the size of the model 
         self.model = ServerModel(12)
+        
         # self.initial_parameters = ndarrays_to_parameters(
         #     [val.cpu().numpy()
         #      for _, val in server_configuration.model.state_dict().items()]
