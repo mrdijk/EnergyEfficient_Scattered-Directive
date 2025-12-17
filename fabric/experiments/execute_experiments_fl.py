@@ -6,8 +6,10 @@ import argparse
 import os
 import re
 import subprocess
+import random
 from kubernetes import client, config
-from datetime import datetime, timezone
+from datetime import datetime
+import pandas as pd
 
 # Function to query Prometheus for energy consumption
 def get_energy_consumption():
@@ -21,26 +23,62 @@ def get_energy_consumption():
     )
     # Parse the response JSON
     response_json = response.json()
-    # print(f"Prometheus response status code: {response.status_code}")
-    # print(f"Prometheus response: {response_json}")
 
     # Extract the energy data
-    energy_data = {}
+    energy_data = []
     # If the query was successful, return the results
     if response.status_code == 200:
         # Construct as readable energy data for each container
         for result in response_json['data']['result']:
             # Extract the container name
-            container_name = result['metric'][constants.PROM_KEPLER_CONTAINER_LABEL]
-            # Extract the actual result (value[0] is the timestamp)
-            value = result['value'][1]
-            energy_data[container_name] = float(value)
+            energy_data.append({
+                'namespace': result['metric']['container_namespace'],
+                'pod_name': result['metric']['pod_name'],
+                'container_name': result['metric']['container_name'],
+                'joules': float(result['value'][1])
+            })
         # Return result
         return energy_data
 
     # If request failed, return empty
-    return {}
+    return []
+
+def calculate_and_save_energy_difference(idle_energy, active_energy, output_dir):
+    """
+    Calculate energy difference and save to CSV.
+    """
+    # Create output directory
+    os.makedirs(output_dir, exist_ok=True)
     
+    # Create lookup dict from idle measurements
+    idle_lookup = {
+        (item['namespace'], item['pod_name'], item['container_name']): item['joules']
+        for item in idle_energy
+    }
+    
+    # Calculate differences
+    energy_data = []
+    for active in active_energy:
+        key = (active['namespace'], active['pod_name'], active['container_name'])
+        idle_joules = idle_lookup.get(key, 0)
+        
+        energy_data.append({
+            'namespace': active['namespace'],
+            'pod_name': active['pod_name'],
+            'container_name': active['container_name'],
+            'idle_joules': idle_joules,
+            'active_joules': active['joules'],
+            'difference_joules': active['joules'] - idle_joules
+        })
+    
+    # Save to CSV
+    df = pd.DataFrame(energy_data)
+    csv_path = os.path.join(output_dir, "energy_consumption.csv")
+    sorted_df = df.groupby(['namespace','pod_name', 'container_name']).sum().sort_values('difference_joules', ascending=False)
+    sorted_df.to_csv(csv_path, index=False)
+    
+    print(f"Results saved to {csv_path}")
+
 def get_logs():
     #Load kubernetes configuration
     config.load_kube_config()
@@ -104,81 +142,59 @@ def save_accuracies(accuracies: list[str], output_dir: str):
             f.write("  ".join(map(str, row)) + "\n")
 
 # Main function to execute the experiment
-def run_experiment(output_dir, exp_clients, exp_cycles):
+def run_experiment(output_dir, providers):
     results = []
     requests_url = constants.APPROVAL_URL
 
     # Phase 1: Idle period
     # Wait idle period
-    print("Waiting for idle period...")
+    print(f"Waiting for idle period ({constants.IDLE_PERIOD}s)")
     time.sleep(constants.IDLE_PERIOD)
     # Measure energy after idle (end_idle/start_active)
     idle_energy = get_energy_consumption()
     print(f"Idle Energy: {idle_energy} (in J)")
 
     # Phase 2: Active period
+    runs = {}
     # Record the start time of the active period
     active_start_time = time.time()
-
+    
     # Construct HFL request body
     hfl_request_body = constants.HFL_REQUEST
     headers = constants.HEADERS_APPROVAL.copy()
-    # Select number of nodes from data providers (+1 for the server)
-    print(f"Using the followiong clients for training {constants.DATA_PROVIDERS[1:exp_clients+1]}")
-    hfl_request_body["dataProviders"] = constants.DATA_PROVIDERS[:exp_clients+1]
+    # Select a sample from data providers (+ the server)
+    # providers = ["server"] + random.sample(list(constants.DATA_PROVIDERS.keys()), exp_clients)
+    print(f"Using the followiong clients for training {providers}")
+    hfl_request_body["dataProviders"] =  providers
     hfl_request_body["data_request"]["data"]["cycles"] = exp_cycles
 
     # Execute HFL request, using specific headers created for FABRIC
+    # print("Request time: ", format_timestamp())
     requests.post(requests_url, json=hfl_request_body, headers=headers)
-
-    print("Waiting for HFL to run")
+    
+    # print("Waiting for HFL to run")
     # print("Waiting 120 seconds")
     # time.sleep(30)
     # print("Waiting 90 seconds")
     # time.sleep(30)
-    # print("Waiting 60 seconds")
-    # time.sleep(30)
+    print("Waiting 60 seconds")
+    time.sleep(30)
     print("Waiting 30 seconds")
     time.sleep(30)
-    # time.sleep(120)
-
-    # Measure energy after active period (end_active) after the active period
+    
+    # print("Active query time: ", format_timestamp())
     active_energy = get_energy_consumption()
     print(f"Active Energy: {active_energy} (in J)")
-
-    response = requests.get(
-        f"{constants.PROMETHEUS_URL}/api/v1/query",
-        params={
-            # Use range query, as we found that this was the most reliable in our thesis
-            "query": "increase(kepler_node_joules_total[2m])-(sum(increase(kepler_container_joules_total[2m])) + sum(increase(kepler_system_joules_total[2m])) + sum(increase(kepler_kernel_joules_total[2m])))"
-        },
-    )
-    # Parse the response JSON
-    response_json = response.json()
-    # print(f"Prometheus response status code: {response.status_code}")
-    print(f"Prometheus response: {response_json}")
-
+    # print("Post request time: ", format_timestamp())
+    
     # Get the results from the logs of the api-gateway
     logs = get_logs()
     accuracies = parse_logs(logs)
     save_accuracies(accuracies, output_dir)
     print(f"Saved accuracy logs to {output_dir}")
-    
-    energy_difference = {}
-    for container, value in active_energy.items():
-        energy_difference[container] = value - idle_energy[container]
-    
-    # Extract results for this run
-    results = {
-        # "runs": runs,
-        "idle_energy": idle_energy,
-        "active_energy": active_energy,
-        "difference": energy_difference
-    }
 
-    # Save experiment results to files
-    save_results(results, output_dir)
-
+    # Calculate the difference between idle and active energy consumption
+    calculate_and_save_energy_difference(idle_energy, active_energy, output_dir)
 
 def save_results(results, output_dir):
     print("Saving experiment results to file...")
@@ -186,48 +202,6 @@ def save_results(results, output_dir):
     # Ensure the output directory exists
     output_dir_exp = os.path.join(output_dir)
     os.makedirs(output_dir_exp, exist_ok=True)
-
-    # Save runs results to CSV
-    # csv_file = os.path.join(output_dir_exp, "results.csv")
-    # Add the file
-    # with open(csv_file, mode="w", newline="") as file:
-        # Add run_nr as field and each key from the the runs list 
-        # fieldnames = list(results.keys())
-        # writer = csv.DictWriter(file, fieldnames=fieldnames)
-        # writer.writeheader()
-        # total_exec_time = 0
-        # For each run, write the data
-        # for run_nr, run_data in results["runs"].items():
-        #     row = {"run_nr": run_nr}
-        #     row.update(run_data)
-        #     total_exec_time += run_data["appr_exec_time"] + run_data["data_req_exec_time"]
-        #     writer.writerow(row)
-    # Output file location that is clickable for the user
-    # print(f"Runs results saved to {os.path.join(os.getcwd(), csv_file)}")
-
-    # Calculate average execution times
-    # average_exec_time = total_exec_time / len(results["runs"])
-
-    # # Save experiment results to CSV
-    # experiment_csv_file = os.path.join(output_dir_exp, "full_experiment_results.csv")
-    # with open(experiment_csv_file, mode="w", newline="") as file:
-    #     fieldnames = ["idle_energy_total", "active_energy_total", "total_energy_difference", "average_exec_time"]
-    #     writer = csv.DictWriter(file, fieldnames=fieldnames)
-    #     writer.writeheader()
-    #     # Calculate total idle, active and difference energy consumption
-    #     total_idle_energy = sum(float(value) for value in results["idle_energy"].values())
-    #     total_active_energy = sum(float(value) for value in results["active_energy"].values())
-    #     total_difference = total_active_energy - total_idle_energy
-        
-    #     # Add energy data
-    #     writer.writerow({
-    #         "idle_energy_total": total_idle_energy,
-    #         "active_energy_total": total_active_energy,
-    #         "total_energy_difference": total_difference,
-    #         "average_exec_time": average_exec_time
-    #     })
-    # # Output file location that is clickable for the user
-    # print(f"Full experiment results saved to {os.path.join(os.getcwd(), experiment_csv_file)}")
 
     # Save full active and idle energy values to a text file
     full_energy_file = os.path.join(output_dir_exp, "full_energy_values.txt")
@@ -239,7 +213,7 @@ def save_results(results, output_dir):
         for container, value in results["active_energy"].items():
             file.write(f"{container}: {value}\n")
         file.write("\nDifference in Energy:\n")
-        for container, value in results["difference"].item():
+        for container, value in results["difference"].items():
             file.write(f"{container}: {value}\n")
     # Output file location that is clickable for the user
     print(f"Full energy values saved to {os.path.join(os.getcwd(), full_energy_file)}")
@@ -247,21 +221,33 @@ def save_results(results, output_dir):
 
 def format_timestamp():
     # Generate the current timestamp
-    timestamp = datetime.now().strftime("%y%m%d-%H%M")
+    timestamp = datetime.now().strftime("%y%m%d-%H%M%S")
     return timestamp
 
 
 if __name__ == "__main__":
-    # Add argument parser
     parser = argparse.ArgumentParser(description="Run energy efficiency experiment")
-    parser.add_argument("exp_clients", type=int, help="The number of expected clients")
-    parser.add_argument("exp_cycles", type=int, help="The number of training rounds performed")
+    parser.add_argument("exp_clients", type=int, help="The number of expected clients')")
+    parser.add_argument("exp_cycles", type=int, help="The number of rounds that are performed")
     # Parse args
     args = parser.parse_args()
 
     exp_clients = args.exp_clients
     exp_cycles = args.exp_cycles
-    output_dir = os.path.join('data', f'{exp_clients}_{exp_cycles}_{format_timestamp()}')
+    output_dir = os.path.join('data', f'{exp_clients}', f'{exp_cycles}', f'{format_timestamp()}')
+    sample = random.sample(list(constants.DATA_PROVIDERS.keys()), exp_clients)
+    providers = ["server"] + sample
+    print("Running experiments with the following clients\n")
+    print("Client: #Rows")
+    for s in sample:
+        print(s, ": ",constants.DATA_PROVIDERS[s])
+
+    os.makedirs(output_dir, exist_ok=True)
+    rows_file = os.path.join(output_dir, "number_of_rows.txt")
+    with open(rows_file, mode="w") as file:
+        file.write("Client: #Rows\n")
+        for s in sample:
+            file.write(f"{s} : {constants.DATA_PROVIDERS[s]}")
 
     print(f"\nStarting experiment")
-    run_experiment(output_dir, exp_clients, exp_cycles)
+    run_experiment(output_dir, providers)

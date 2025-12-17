@@ -303,9 +303,9 @@ payload = {
     "results": train_results
 }
 
-# os.makedirs("./run_dumps", exist_ok=True)
-# filename = f"./run_dumps/hfl_test_results_{NOF_CLIENTS}_clients_{TOTAL_ROUNDS}_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.json"
-# print(f"Saving to file {filename}")
+os.makedirs("./run_dumps", exist_ok=True)
+filename = f"./run_dumps/hfl_test_results_{NOF_CLIENTS}_clients_{TOTAL_ROUNDS}_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.json"
+print(f"Saving to file {filename}")
 # with open(filename, "w") as f:
 #     json.dump(payload, f, indent=2)
 

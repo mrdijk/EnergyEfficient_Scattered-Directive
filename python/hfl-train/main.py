@@ -222,14 +222,14 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication,
                 hfl_client.train_local(epochs=epochs)
                 model_update_json = hfl_client.get_model_update()
                 acc = hfl_client.evaluate()
-                logger.info(f"Local modal accuracy is {acc:.2f}")
+                logger.info(f"Local model accuracy is {acc}")
 
                 data = Struct()
                 data.update({"model_update": model_update_json})
-                
+                data.update({"accuracy": acc})
                 training_time = (time.perf_counter() - start) * 1000
                 logger.info(f"Training time: {training_time:.2f}ms")
-                data.update({"ts": training_time:.2f})
+                data.update({"ts": training_time})
                 ms_config.next_client.ms_comm.send_data(msComm, data, {})
 
             elif request.type == "hflLoadGlobalModel":

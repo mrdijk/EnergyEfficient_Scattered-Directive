@@ -10,6 +10,10 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"strconv"
+	"os"
+	"encoding/csv"
+	
 
 	"github.com/Jorrit05/DYNAMOS/pkg/api"
 	"github.com/Jorrit05/DYNAMOS/pkg/lib"
@@ -17,6 +21,59 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.opencensus.io/trace"
 )
+
+type ClientMetrics struct {
+	ClientID     string
+	Accuracy     float64
+	TrainingTime float64  // in milliseconds
+}
+
+type RoundMetrics struct {
+	GlobalAccuracy      float64
+	AggregationTime     float64
+	TotalTrainingTime   float64
+	ClientMetrics       []ClientMetrics
+	RoundDuration       time.Duration
+}
+
+type ExperimentResults struct {
+	JobID   string
+	Rounds  []RoundMetrics
+	mu      sync.Mutex
+}
+
+func (er *ExperimentResults) SaveToCSV(filename string) error {
+	file, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	writer := csv.NewWriter(file)
+	defer writer.Flush()
+
+	// Write header
+	writer.Write([]string{"Round", "ClientID", "ClientAccuracy", "ClientTrainingTime_ms", 
+		"GlobalAccuracy", "AggregationTime_ms", "TotalTrainingTime_ms", "RoundDuration_ms"})
+
+	// Write data
+	for roundNum, round := range er.Rounds {
+		for _, client := range round.ClientMetrics {
+			writer.Write([]string{
+				strconv.Itoa(roundNum + 1),
+				client.ClientID,
+				strconv.FormatFloat(client.Accuracy, 'f', 6, 64),
+				strconv.FormatFloat(client.TrainingTime, 'f', 2, 64),
+				strconv.FormatFloat(round.GlobalAccuracy, 'f', 6, 64),
+				strconv.FormatFloat(round.AggregationTime, 'f', 2, 64),
+				strconv.FormatFloat(round.TotalTrainingTime, 'f', 2, 64),
+				strconv.FormatInt(round.RoundDuration.Milliseconds(), 10),
+			})
+		}
+	}
+
+	return nil
+}
 
 func requestHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -141,9 +198,14 @@ func requestHandler() http.HandlerFunc {
 	}
 }
 
-func runHFLTrainingRound(dataRequest map[string]any, clients map[string]string, serverAuth, serverUrl string, learning_rate float64) (float64, error) {
+func runHFLTrainingRound(dataRequest map[string]any, clients map[string]string, serverAuth, serverUrl string, learning_rate float64) (RoundMetrics, error) {
 	var wg sync.WaitGroup
+	var mu sync.Mutex  // Add mutex
 	clientUpdates := map[string]string{}
+	clientMetricsList := []ClientMetrics{}
+	var total_time_per_round float64 = 0.0
+	start := time.Now()
+	logger.Sugar().Infof("Start time: %s", start)
 
 	// Ask each client to train locally 
 	for auth, url := range clients {
@@ -164,8 +226,10 @@ func runHFLTrainingRound(dataRequest map[string]any, clients map[string]string, 
 		dataRequestJson, err := json.Marshal(dataRequest)
 		if err != nil {
 			logger.Sugar().Errorf("Error marshalling combined data: %v", err)
-			return 0., err
+			return RoundMetrics{}, err
 		}
+
+		
 
 		go func(auth string, endpoint string) {
 			defer wg.Done()
@@ -186,6 +250,22 @@ func runHFLTrainingRound(dataRequest map[string]any, clients map[string]string, 
 
 			dataJson := responseJson.Data.AsMap()
 			modelUpdate, ok := dataJson["model_update"].(string)
+			client_accuracy := dataJson["accuracy"].(float64)
+			training_duration := dataJson["ts"].(float64)
+			// Use mutex to update to avoid race condition
+			mu.Lock()
+			total_time_per_round += training_duration
+			clientMetricsList = append(clientMetricsList, ClientMetrics{
+				ClientID:     auth,
+				Accuracy:     client_accuracy,
+				TrainingTime: training_duration,
+			})
+			if ok {
+				clientUpdates[strings.ToLower(auth)] = modelUpdate
+			}
+			mu.Unlock()
+
+			logger.Sugar().Infof("Local training duration for %s: %f ms", auth,  training_duration)
 			if !ok {
 				logger.Sugar().Errorf("No model_update found in client %s response.", auth)
 				return
@@ -197,6 +277,7 @@ func runHFLTrainingRound(dataRequest map[string]any, clients map[string]string, 
 
 	wg.Wait()
 
+	logger.Sugar().Infof("Total training time for this round: %f", total_time_per_round)
 	// Send all client model updates to server for aggregation 
 	target := strings.ToLower(serverAuth)
 	serverEndpoint := fmt.Sprintf("http://%s:8080/agent/v1/hflTrainRequest/%s", serverUrl, target)
@@ -214,13 +295,13 @@ updateList := []string{}
 	dataRequestJson, err := json.Marshal(dataRequest)
 	if err != nil {
 		logger.Sugar().Errorf("Error marshalling server aggregation request: %v", err)
-		return 0., err
+		return RoundMetrics{}, err
 	}
 
 	responseData, err := sendData(serverEndpoint, dataRequestJson)
 	if err != nil {
 		logger.Sugar().Errorf("Error sending aggregation request to server: %v", err)
-		return 0., err
+		return RoundMetrics{}, err
 	}
 
 	serverResponse := &pb.MicroserviceCommunication{}
@@ -230,11 +311,11 @@ updateList := []string{}
 	}
 
 	accuracy := serverResponse.Data.GetFields()["accuracy"].GetNumberValue()
+	aggregation_duration := serverResponse.Data.GetFields()["ts"].GetNumberValue()
+	logger.Sugar().Infof("Aggregration durarion: %f ms", aggregation_duration)
 	// loss := serverResponse.Data.GetFields()["loss"].GetNumberValue()
 	globalParams := serverResponse.Data.GetFields()["global_params"].GetStringValue()
 
-
-	// logger.Sugar().Infof("Loss of global model: %f", loss)
 	// Send the new global model to all clients 
 	for auth, url := range clients {
 		wg.Add(1)
@@ -249,7 +330,7 @@ updateList := []string{}
 		dataRequestJson, err := json.Marshal(dataRequest)
 		if err != nil {
 			logger.Sugar().Errorf("Error marshalling global model broadcast: %v", err)
-			return 0., err
+			return RoundMetrics{}, err
 		}
 
 		go func(auth string, endpoint string) {
@@ -264,7 +345,14 @@ updateList := []string{}
 
 	wg.Wait()
 
-	return accuracy, nil
+	return RoundMetrics{
+		GlobalAccuracy:    accuracy,
+		AggregationTime:   aggregation_duration,
+		TotalTrainingTime: total_time_per_round,
+		ClientMetrics:     clientMetricsList,
+		RoundDuration:     time.Since(start),
+	}, nil
+
 }
 
 func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]string, jobId string, ctx context.Context) []byte {
@@ -273,6 +361,10 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 	var serverAuth string
 	var finalAccuracy float64
 	var wg sync.WaitGroup
+	results := &ExperimentResults{
+	JobID:  jobId,
+	Rounds: make([]RoundMetrics, 0),
+}
 
 	var cycles int64 = 10
 	var learning_rate float64 = 0.05
@@ -323,16 +415,16 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 	var noPing bool = false
 	var noPingAuth []string
 	
-	logger.Sugar().Info("providers: ", authorizedProviders)
+	// logger.Sugar().Info("providers: ", authorizedProviders)
 
 	for auth, url := range authorizedProviders {
-		logger.Sugar().Infof("provider: %s", auth)
+		// logger.Sugar().Infof("provider: %s", auth)
 		
 		wg.Add(1)
 
 		target := strings.ToLower(auth)
 		endpoint := fmt.Sprintf("http://%s:8080/agent/v1/hflTrainRequest/%s", url, target)
-		logger.Sugar().Infof("Endpoint: %s", endpoint)
+		// logger.Sugar().Infof("Endpoint: %s", endpoint)
 
 		go func(auth string, endpoint string) {
 			logger.Sugar().Infof("Sending Ping to %s", auth)
@@ -346,7 +438,6 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 				if i == 4 {
 					noPing = true
 					noPingAuth = append(noPingAuth, auth)
-					logger.Sugar().Errorf("No ping %s", auth)
 				}
 			}
 
@@ -358,6 +449,22 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 
 	if noPing {
 		logger.Sugar().Errorf("No ping from %s.", noPingAuth)
+		// If a client doesn't ping, shutdown
+		for auth, url := range authorizedProviders {
+			wg.Add(1)
+			target := strings.ToLower(auth)
+			endpoint := fmt.Sprintf("http://%s:8080/agent/v1/hflTrainRequest/%s", url, target)
+
+			go func(auth, endpoint string) {
+				logger.Sugar().Infof("-- Sending shutdown request to -> %s ", auth)
+				sendData(endpoint, dataRequestJson)
+				wg.Done()
+			}(auth, endpoint)
+		}
+
+		wg.Wait()
+
+		return []byte{}
 	}
 
 	logger.Sugar().Info("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
@@ -422,20 +529,21 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 		}
 
 		logger.Sugar().Info("Sending training requests")
-		accuracy, err := runHFLTrainingRound(dataRequest, clients, serverAuth, serverUrl, learning_rate)
-		finalAccuracy = accuracy
-		logger.Sugar().Info("- Intermediate accuracy achieved: ", accuracy, " for round ", round)
-
+		// accuracy, training_duration, err := runHFLTrainingRound(dataRequest, clients, serverAuth, serverUrl, learning_rate)
+		RoundMetrics, err := runHFLTrainingRound(dataRequest, clients, serverAuth, serverUrl, learning_rate)
 		if err != nil {
-			logger.Sugar().Errorf("Training round %d returned an error: %v", round, err)
-			break TrainLoop
+			logger.Sugar().Errorf("Round %d failed: %v", round, err)
+			continue
 		}
+		results.Rounds = append(results.Rounds, RoundMetrics)
+
+		logger.Sugar().Infof("Round %d complete - Global Accuracy: %.4f, Duration: %v",  round, RoundMetrics.GlobalAccuracy, RoundMetrics.RoundDuration)
+		finalAccuracy = RoundMetrics.GlobalAccuracy
 	}
 
 	logger.Sugar().Info("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
 	logger.Sugar().Info("Final accuracy achieved: ", finalAccuracy)
 	logger.Sugar().Info("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
-
 	// Shutdown all microservices
 	dataRequest["type"] = "hflShutdownRequest"
 	dataRequestJson, err = json.Marshal(dataRequest)
@@ -443,7 +551,7 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 		logger.Sugar().Errorf("Error marshalling shutdown request: %v", err)
 		return []byte{}
 	}
-
+	
 	for auth, url := range authorizedProviders {
 		wg.Add(1)
 		target := strings.ToLower(auth)
@@ -458,16 +566,28 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 
 	wg.Wait()
 
-	response := map[string]any{
-		"jobId":    jobId,
-		"accuracy": finalAccuracy,
+	// Save results to CSV
+	// filename := fmt.Sprintf("hfl_results_%s.csv", jobId)
+	nClients := len(authorizedProviders)
+	now := time.Now()
+	filename := fmt.Sprintf("%d_%d_%s_%s", nClients, cycles, now.Format(time.DateOnly), now.Format(time.TimeOnly))
+	if err := results.SaveToCSV(filename); err != nil {
+		logger.Sugar().Errorf("Failed to save results to CSV: %v", err)
 	}
 
-	logger.Sugar().Info("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
-	logger.Sugar().Info("Final HFL accuracy achieved: ", finalAccuracy)
-	logger.Sugar().Info("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
+	// Return JSON summary
+	jsonData, _ := json.Marshal(results)
+	return jsonData
+	// response := map[string]any{
+	// 	"jobId":    jobId,
+	// 	"accuracy": finalAccuracy,
 	
-	return cleanupAndMarshalResponse(response)
+
+	// logger.Sugar().Info("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
+	// logger.Sugar().Info("Final HFL accuracy achieved: ", finalAccuracy)
+	// logger.Sugar().Info("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
+	// logger.Sugar().Infof("Total training time: %f", total_training_time)
+	// return cleanupAndMarshalResponse(jsonData)
 }
 
 

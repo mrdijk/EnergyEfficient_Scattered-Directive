@@ -167,9 +167,6 @@ class HFLServer:
 
         data = Struct()
         data.update({"accuracy": accuracy})
-        # data.update({"loss": loss.item()})
-        logger.info(f"Predicted survivors: {(predicted.sum().item())} out of 340 actual survivors")
-        logger.info(f"Aggregated global model accuracy: {accuracy:.2f} and loss: {loss:.2f}")
 
         # Serialize averaged model parameters for clients
         np_params = []
@@ -208,7 +205,7 @@ def handleAggregateRequest(msComm):
     agg_result = hfl_server.aggregate_fit(client_updates)
     agg_duration =  (time.perf_counter() - start) * 1000
     logger.info(f"Aggregation duration: {agg_duration:.2f}ms")
-    agg_result.update({"ts": agg_duration:.2f})
+    agg_result.update({"ts": agg_duration})
     ms_config.next_client.ms_comm.send_data(msComm, agg_result, {})
 
 
