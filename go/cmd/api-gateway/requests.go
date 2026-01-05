@@ -19,8 +19,51 @@ import (
 	"github.com/Jorrit05/DYNAMOS/pkg/lib"
 	pb "github.com/Jorrit05/DYNAMOS/pkg/proto"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"github.com/google/uuid"
 	"go.opencensus.io/trace"
 )
+
+const (
+    StatusPending = "pending"
+    StatusDone    = "done"
+    StatusFailed  = "failed"
+)
+
+var (
+	activeJobID      string
+	activeJobLock    sync.Mutex   // to allow only 1 active job at any time
+	trainingRequests = sync.Map{} // map[string]TrainingRequestData
+)
+
+type TrainingRequestData struct {
+	Status   string
+	Data  *ExperimentData
+	// Metadata map[string]any
+	// add more fields as needed
+}
+
+func getTrainingStatusHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		logger.Sugar().Info("Starting getTrainingStatusHandler")
+		requestID := r.URL.Query().Get("id")
+		v, ok := trainingRequests.Load(requestID)
+		if !ok {
+			http.Error(w, "Request ID not found", http.StatusNotFound)
+			return
+		}
+
+		logger.Sugar().Debug("Found training request: ", requestID)
+		reqData := v.(TrainingRequestData)
+		resp := map[string]any{
+			"request_id": requestID,
+			"status":     reqData.Status,
+			"data":    reqData.Data,
+		}
+		respBytes, _ := json.MarshalIndent(resp, "", "    ")
+		w.WriteHeader(http.StatusOK)
+		w.Write(respBytes)
+	}
+}
 
 type ClientMetrics struct {
 	ClientID     string
@@ -36,13 +79,15 @@ type RoundMetrics struct {
 	RoundDuration       time.Duration
 }
 
-type ExperimentResults struct {
-	JobID   string
+type ExperimentData struct {
+	// JobID   string
+	startTime string
+	endTime string
 	Rounds  []RoundMetrics
 	mu      sync.Mutex
 }
 
-func (er *ExperimentResults) SaveToCSV(filename string) error {
+func (er *ExperimentData) SaveToCSV(filename string) error {
 	file, err := os.Create(filename)
 	if err != nil {
 		return err
@@ -77,15 +122,46 @@ func (er *ExperimentResults) SaveToCSV(filename string) error {
 
 func requestHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		logger.Debug("Starting requestApprovalHandler")
-		// Requests may take up to 10 minutes now
-		ctxWithTimeout, cancel := context.WithTimeout(r.Context(), 60*time.Second)
-		defer cancel()
+		activeJobLock.Lock()
+		defer activeJobLock.Unlock()
 
-		// Start a new span with the context that has a timeout
-		ctx, span := trace.StartSpan(ctxWithTimeout, "requestApprovalHandler")
-		defer span.End()
+		// Check for existing active job
+		if activeJobID != "" {
+			v, _ := trainingRequests.Load(activeJobID)
+			reqData := v.(TrainingRequestData)
+			resp := map[string]any{
+				"error":             "A training job is already in progress.",
+				"active_request_id": activeJobID,
+				"active_status":     reqData.Status,
+			}
+			respBytes, _ := json.Marshal(resp)
+			w.WriteHeader(http.StatusTooManyRequests)
+			w.Write(respBytes)
+			return
+		}
 
+		// Accept new job
+		requestID := uuid.New().String()
+		activeJobID = requestID
+		reqData := TrainingRequestData{
+			Status: StatusPending,
+			Data: &ExperimentData{
+				// JobID:  requestID,
+				Rounds: make([]RoundMetrics, 0),
+				startTime: time.Now().Format("02-01-06-15:04:05"),
+			},
+		}
+		trainingRequests.Store(requestID, reqData)
+
+		resp := map[string]any{
+			"request_id": requestID,
+			"status":     StatusPending,
+			"startTime": reqData.Data.startTime,
+		}
+
+		logger.Sugar().Info("Accepted new job with id: ", activeJobID)
+
+		// Parse the request body
 		body, err := api.GetRequestBody(w, r, serviceName)
 		if err != nil {
 			return
@@ -126,76 +202,86 @@ func requestHandler() http.HandlerFunc {
 			Options:          dataRequestOptions.Options,
 		}
 
-		// Create a channel to receive the response
-		responseChan := make(chan validation)
+		respBytes, _ := json.Marshal(resp)
+		w.WriteHeader(http.StatusAccepted)
+		w.Write(respBytes)
 
-		requestApprovalMutex.Lock()
-		requestApprovalMap[protoRequest.User.Id] = responseChan
-		requestApprovalMutex.Unlock()
+		// ---- TRIGGER TRAINING IN BACKGROUND ----
+		go func() {
+			startTraining(protoRequest, dataRequestInterface, apiReqApproval, r, requestID)
+		}()
 
-		_, err = c.SendRequestApproval(ctx, protoRequest)
-		if err != nil {
-			logger.Sugar().Errorf("error in sending requestapproval: %v", err)
+	}
+}
+
+func startTraining(protoRequest *pb.RequestApproval, dataRequestInterface map[string]any, apiReqApproval api.RequestApproval, r *http.Request, requestID string) {
+	logger.Debug("Starting training process...")
+	// Requests may take up to 10 minutes now
+	ctxWithTimeout, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	// Start a new span with the context that has a timeout
+	ctx, span := trace.StartSpan(ctxWithTimeout, "requestApprovalHandler")
+	defer span.End()
+
+	// Create a channel to receive the response
+	responseChan := make(chan validation)
+
+	requestApprovalMutex.Lock()
+	requestApprovalMap[protoRequest.User.Id] = responseChan
+	requestApprovalMutex.Unlock()
+
+	_, err := c.SendRequestApproval(ctx, protoRequest)
+	if err != nil {
+		logger.Sugar().Errorf("error in sending requestapproval: %v", err)
+	}
+
+	select {
+	case validationStruct := <-responseChan:
+		msg := validationStruct.response
+
+		logger.Sugar().Infof("Received response, %s", msg.Type)
+		if msg.Type != "requestApprovalResponse" {
+			logger.Sugar().Errorf("Unexpected message received, type: %s", msg.Type)
+			// http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
 		}
 
-		select {
-		case validationStruct := <-responseChan:
-			msg := validationStruct.response
+		requestMetadata := &pb.RequestMetadata{
+			JobId: msg.JobId,
+		}
+		dataRequestInterface["requestMetadata"] = requestMetadata
 
-			logger.Sugar().Infof("Received response, %s", msg.Type)
-			if msg.Type != "requestApprovalResponse" {
-				logger.Sugar().Errorf("Unexpected message received, type: %s", msg.Type)
-				http.Error(w, "Internal server error", http.StatusInternalServerError)
+		logger.Sugar().Infof("Data Prepared jsonData: %s", dataRequestInterface)
+
+		var response []byte
+
+		if apiReqApproval.Type == "hflTrainModelRequest" {
+			ctxWithoutCancel := context.WithoutCancel(r.Context())
+			response = runHFLTraining(dataRequestInterface, msg.AuthorizedProviders, msg.JobId, ctxWithoutCancel, requestID)
+
+		} else {
+			// Marshal the combined data back into JSON for forwarding
+			dataRequestJson, err := json.Marshal(dataRequestInterface)
+			if err != nil {
+				logger.Sugar().Errorf("Error marshalling combined data: %v", err)
 				return
 			}
 
-			requestMetadata := &pb.RequestMetadata{
-				JobId: msg.JobId,
-			}
-			dataRequestInterface["requestMetadata"] = requestMetadata
-
-			logger.Sugar().Infof("Data Prepared jsonData: %s", dataRequestInterface)
-
-			var response []byte
-
-			// if apiReqApproval.Type == "vflTrainModelRequest" {
-			// 	ctxWithoutCancel := context.WithoutCancel(r.Context())
-			// 	response = runVFLTraining(dataRequestInterface, msg.AuthorizedProviders, msg.JobId, ctxWithoutCancel)
-			// } else {
-			// 	// Marshal the combined data back into JSON for forwarding
-			// 	dataRequestJson, err := json.Marshal(dataRequestInterface)
-			// 	if err != nil {
-			// 		logger.Sugar().Errorf("Error marshalling combined data: %v", err)
-			// 		return
-			// 	}
-
-			// 	response = sendDataToAuthProviders(dataRequestJson, msg.AuthorizedProviders, apiReqApproval.Type, msg.JobId)
-			// }
-
-			if apiReqApproval.Type == "hflTrainModelRequest" {
-				ctxWithoutCancel := context.WithoutCancel(r.Context())
-				logger.Sugar().Info("Start HFL Training")
-				response = runHFLTraining(dataRequestInterface, msg.AuthorizedProviders, msg.JobId, ctxWithoutCancel)
-			} else {
-				// logger.Sugar().Info("Forward data")
-				dataRequestJson, err := json.Marshal(dataRequestInterface)
-				if err != nil {
-					logger.Sugar().Errorf("Error marshalling combined data: %v", err)
-					return
-				}
-
-				response = sendDataToAuthProviders(dataRequestJson, msg.AuthorizedProviders, apiReqApproval.Type, msg.JobId)
-			}
-
-			w.WriteHeader(http.StatusOK)
-			w.Write(response)
-			return
-
-		case <-ctx.Done():
-			http.Error(w, "Request timed out", http.StatusRequestTimeout)
-			return
+			response = sendDataToAuthProviders(dataRequestJson, msg.AuthorizedProviders, apiReqApproval.Type, msg.JobId)
 		}
+
+		// w.WriteHeader(http.StatusOK)
+		// w.Write(response)
+		logger.Sugar().Info("Training process completed for request id: ", requestID)
+		logger.Sugar().Info("Response: ", string(response))
+		return
+
+	case <-ctx.Done():
+		// http.Error(w, "Request timed out", http.StatusRequestTimeout)
+		return
 	}
+
 }
 
 func runHFLTrainingRound(dataRequest map[string]any, clients map[string]string, serverAuth, serverUrl string, learning_rate float64) (RoundMetrics, error) {
@@ -204,8 +290,8 @@ func runHFLTrainingRound(dataRequest map[string]any, clients map[string]string, 
 	clientUpdates := map[string]string{}
 	clientMetricsList := []ClientMetrics{}
 	var total_time_per_round float64 = 0.0
+
 	start := time.Now()
-	logger.Sugar().Infof("Start time: %s", start)
 
 	// Ask each client to train locally 
 	for auth, url := range clients {
@@ -265,7 +351,7 @@ func runHFLTrainingRound(dataRequest map[string]any, clients map[string]string, 
 			}
 			mu.Unlock()
 
-			logger.Sugar().Infof("Local training duration for %s: %f ms", auth,  training_duration)
+			// logger.Sugar().Infof("Local training duration for %s: %f ms", auth,  training_duration)
 			if !ok {
 				logger.Sugar().Errorf("No model_update found in client %s response.", auth)
 				return
@@ -277,7 +363,7 @@ func runHFLTrainingRound(dataRequest map[string]any, clients map[string]string, 
 
 	wg.Wait()
 
-	logger.Sugar().Infof("Total training time for this round: %f", total_time_per_round)
+	logger.Sugar().Infof("Total training time for this round[ms]: %f", total_time_per_round)
 	// Send all client model updates to server for aggregation 
 	target := strings.ToLower(serverAuth)
 	serverEndpoint := fmt.Sprintf("http://%s:8080/agent/v1/hflTrainRequest/%s", serverUrl, target)
@@ -312,7 +398,7 @@ updateList := []string{}
 
 	accuracy := serverResponse.Data.GetFields()["accuracy"].GetNumberValue()
 	aggregation_duration := serverResponse.Data.GetFields()["ts"].GetNumberValue()
-	logger.Sugar().Infof("Aggregration durarion: %f ms", aggregation_duration)
+	// logger.Sugar().Infof("Aggregration durarion: %f ms", aggregation_duration)
 	// loss := serverResponse.Data.GetFields()["loss"].GetNumberValue()
 	globalParams := serverResponse.Data.GetFields()["global_params"].GetStringValue()
 
@@ -344,33 +430,36 @@ updateList := []string{}
 	}
 
 	wg.Wait()
+	duration := time.Duration(time.Since(start))
+	logger.Sugar().Infof("Round duration in seconds: %f", duration.Seconds())
 
 	return RoundMetrics{
 		GlobalAccuracy:    accuracy,
 		AggregationTime:   aggregation_duration,
 		TotalTrainingTime: total_time_per_round,
 		ClientMetrics:     clientMetricsList,
-		RoundDuration:     time.Since(start),
+		RoundDuration:     duration,
 	}, nil
 
 }
 
-func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]string, jobId string, ctx context.Context) []byte {
+func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]string, jobId string, ctx context.Context, requestID string) []byte {
 	clients := map[string]string{}
 	var serverUrl string
 	var serverAuth string
 	var finalAccuracy float64
-	var wg sync.WaitGroup
-	results := &ExperimentResults{
-	JobID:  jobId,
-	Rounds: make([]RoundMetrics, 0),
-}
-
 	var cycles int64 = 10
 	var learning_rate float64 = 0.05
 	// var change_policies int64 = -1
 	var dataProviders []string = []string{}
 
+	var wg sync.WaitGroup
+	results := &ExperimentData{
+	// JobID:  jobId,
+	startTime: "",
+	endTime: "",
+	Rounds: make([]RoundMetrics, 0),
+}
 	data, ok := dataRequest["data"].(map[string]any)
 	logger.Sugar().Info("Data from req: ", data)
 
@@ -381,10 +470,9 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 		if val, ok := data["learning_rate"].(float64); ok {
 			learning_rate = val
 		}
-		// if val, ok := data["change_policies"].(float64); ok {
-		// 	change_policies = int64(val)
-		// }
 	}
+
+	trainingFailed := false
 
 	for auth, url := range authorizedProviders {
 		if strings.ToLower(auth) == "server" {
@@ -408,7 +496,7 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 	user, ok := dataRequest["user"].(*pb.User)
 
 	if !ok {
-		logger.Sugar().Info("Did not retrieve User from dataRequest, cannot dynamically verify each training round.")
+		logger.Sugar().Error("Did not retrieve User from dataRequest, cannot dynamically verify each training round.")
 		user = &pb.User{}
 	}
 
@@ -449,7 +537,14 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 
 	if noPing {
 		logger.Sugar().Errorf("No ping from %s.", noPingAuth)
-		// If a client doesn't ping, shutdown
+		// 
+		dataRequest["type"] = "hflShutdownRequest"
+		dataRequestJson, err = json.Marshal(dataRequest)
+		if err != nil {
+			logger.Sugar().Errorf("Error marshalling shutdown request: %v", err)
+			return []byte{}
+		}
+		
 		for auth, url := range authorizedProviders {
 			wg.Add(1)
 			target := strings.ToLower(auth)
@@ -471,10 +566,13 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 	logger.Sugar().Info("-=-=-=-=-=-=Starting training-=-=-=-=-=-=-=-=")
 	logger.Sugar().Info("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
 	logger.Sugar().Info("Running HFL for ", cycles, " rounds")
+	start := time.Now().Format(time.RFC3339)
+	results.startTime = start
 
 	TrainLoop:
  		for round := int64(0); round < cycles; round++ {
 		logger.Sugar().Info("Running HFL training round ", round)
+
 		protoRequest := &pb.RequestApproval{
 			Type:             "hflTrainModelRequest",
 			User:             user,
@@ -496,6 +594,7 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 			_, err = c.SendRequestApproval(ctx, protoRequest)
 			if err != nil {
 				logger.Sugar().Warnf("error in sending/receiving requestApproval: %v", err)
+				break TrainLoop
 			}
 
 			if err == nil {
@@ -533,18 +632,37 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 		RoundMetrics, err := runHFLTrainingRound(dataRequest, clients, serverAuth, serverUrl, learning_rate)
 		if err != nil {
 			logger.Sugar().Errorf("Round %d failed: %v", round, err)
-			continue
+			trainingFailed = true
+			break TrainLoop
 		}
 		results.Rounds = append(results.Rounds, RoundMetrics)
 
-		logger.Sugar().Infof("Round %d complete - Global Accuracy: %.4f, Duration: %v",  round, RoundMetrics.GlobalAccuracy, RoundMetrics.RoundDuration)
+		logger.Sugar().Infof("Round %d complete - Global Accuracy: %.4f, Duration[s]: %v",  round, RoundMetrics.GlobalAccuracy, RoundMetrics.RoundDuration.Seconds())
 		finalAccuracy = RoundMetrics.GlobalAccuracy
+		
+		if trainingFailed {
+			break
+		}
 	}
 
+	end := time.Now().Format(time.RFC3339)
+	results.endTime = end
+		
+	// Save results to CSV
+// 	nClients :=(len(authorizedProviders)-1)
+// 	now := time.Now()
+// 	filename := fmt.Sprintf("%d_%d_%s.csv", nClients, cycles, now.Format("02-01-06-150405"))
+// 	if err := results.SaveToCSV(filename); err != nil {
+// 		logger.Sugar().Errorf("Failed to save results to CSV: %v", err)
+// 	}
+// logger.Sugar().Infof("Saved results to: %s", filename)
+
+	
 	logger.Sugar().Info("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
 	logger.Sugar().Info("Final accuracy achieved: ", finalAccuracy)
 	logger.Sugar().Info("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
 	// Shutdown all microservices
+
 	dataRequest["type"] = "hflShutdownRequest"
 	dataRequestJson, err = json.Marshal(dataRequest)
 	if err != nil {
@@ -565,29 +683,60 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 	}
 
 	wg.Wait()
-
-	// Save results to CSV
-	// filename := fmt.Sprintf("hfl_results_%s.csv", jobId)
-	nClients := len(authorizedProviders)
-	now := time.Now()
-	filename := fmt.Sprintf("%d_%d_%s_%s", nClients, cycles, now.Format(time.DateOnly), now.Format(time.TimeOnly))
-	if err := results.SaveToCSV(filename); err != nil {
-		logger.Sugar().Errorf("Failed to save results to CSV: %v", err)
+	
+	logger.Sugar().Debug("test1")
+	
+	response := map[string]any{
+		"jobId":    jobId,
+		"accuracy": finalAccuracy,
+		"start": start,
+		"end": end,
 	}
 
-	// Return JSON summary
-	jsonData, _ := json.Marshal(results)
-	return jsonData
-	// response := map[string]any{
-	// 	"jobId":    jobId,
-	// 	"accuracy": finalAccuracy,
+	// --- SET STATUS and UNLOCK ---
+	v, ok := trainingRequests.Load(requestID)
 	
+	if !ok {
+		logger.Sugar().Error("Could not find the training request to update status.")
+		return []byte{}
+	}
+	
+	logger.Sugar().Debug("test2")
+	reqData := v.(TrainingRequestData)
+	reqData.Data = results
+	logger.Sugar().Debug("reqDat.Data: %s, %s", reqData.Data)
+	
+	logger.Sugar().Debug("results.startTime, results.endTime: %s, %s", results.startTime, results.endTime)
+	logger.Sugar().Debug("reqData.Data.startTime, reqData.Data.endTime: %s, %s", reqData.Data.startTime, reqData.Data.endTime)
 
-	// logger.Sugar().Info("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
-	// logger.Sugar().Info("Final HFL accuracy achieved: ", finalAccuracy)
-	// logger.Sugar().Info("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
-	// logger.Sugar().Infof("Total training time: %f", total_training_time)
-	// return cleanupAndMarshalResponse(jsonData)
+	if trainingFailed {
+		reqData.Status = StatusFailed
+	} else {
+		reqData.Status = StatusDone
+	}
+	trainingRequests.Store(requestID, reqData)
+	logger.Sugar().Infow("Job completed", "requestID", requestID, "status", reqData.Status, "accuracy", finalAccuracy)
+	logger.Sugar().Debug("Start/End: %s, %s",reqData.Data.startTime, reqData.Data.endTime)
+	new_response := map[string]any{
+		"request_id": requestID,
+		"status": reqData.Status,
+		"data": reqData.Data,
+	}
+	// Release the active job lock
+	activeJobLock.Lock()
+	activeJobID = ""
+	activeJobLock.Unlock()
+
+	// Marshal and return
+	logger.Sugar().Debug("test3")
+	responseJson, err := json.MarshalIndent(new_response, "", "    ")
+	if err != nil {
+		logger.Sugar().Errorf("Error marshalling training results: %v", err)
+		return []byte{}
+	}
+
+	logger.Sugar().Infof("Training results: ", string(responseJson))
+	return cleanupAndMarshalResponse(response)  // note this is not the same as responseJson
 }
 
 

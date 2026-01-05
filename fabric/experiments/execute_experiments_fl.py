@@ -12,13 +12,15 @@ from datetime import datetime
 import pandas as pd
 
 # Function to query Prometheus for energy consumption
-def get_energy_consumption():
+def get_energy_consumption(start, end):
     # Query Prometheus
     response = requests.get(
         f"{constants.PROMETHEUS_URL}/api/v1/query",
         params={
             # Use range query, as we found that this was the most reliable in our thesis
-            "query": constants.PROM_ENERGY_QUERY_RANGE
+            "query": constants.PROM_ENERGY_QUERY_RANGE,
+            "start": start,
+            "end": end
         },
     )
     # Parse the response JSON
@@ -148,11 +150,11 @@ def run_experiment(output_dir, providers):
 
     # Phase 1: Idle period
     # Wait idle period
-    print(f"Waiting for idle period ({constants.IDLE_PERIOD}s)")
-    time.sleep(constants.IDLE_PERIOD)
+    # print(f"Waiting for idle period ({constants.IDLE_PERIOD}s)")
+    # time.sleep(constants.IDLE_PERIOD)
     # Measure energy after idle (end_idle/start_active)
-    idle_energy = get_energy_consumption()
-    print(f"Idle Energy: {idle_energy} (in J)")
+    # idle_energy = get_energy_consumption()
+    # print(f"Idle Energy: {idle_energy} (in J)")
 
     # Phase 2: Active period
     runs = {}
@@ -161,7 +163,7 @@ def run_experiment(output_dir, providers):
     
     # Construct HFL request body
     hfl_request_body = constants.HFL_REQUEST
-    headers = constants.HEADERS_APPROVAL.copy()
+    headers = constants.HEADERS.copy()
     # Select a sample from data providers (+ the server)
     # providers = ["server"] + random.sample(list(constants.DATA_PROVIDERS.keys()), exp_clients)
     print(f"Using the followiong clients for training {providers}")
@@ -170,31 +172,37 @@ def run_experiment(output_dir, providers):
 
     # Execute HFL request, using specific headers created for FABRIC
     # print("Request time: ", format_timestamp())
-    requests.post(requests_url, json=hfl_request_body, headers=headers)
+    request_respons = requests.post(requests_url, json=hfl_request_body, headers=headers)
+    hfl_request_json = request_respons.json()
+
+    # get request id and status from respons to use for polling
+    request_id = hfl_request_json['request_id']
+    status = hfl_request_json['status']
+
+    # Poll status until training is done to collect the data
+    status_url = constants.STATUS_URL + request_id
+    print("Polling training request with id: ", request_id)
     
-    # print("Waiting for HFL to run")
-    # print("Waiting 120 seconds")
-    # time.sleep(30)
-    # print("Waiting 90 seconds")
-    # time.sleep(30)
-    print("Waiting 60 seconds")
-    time.sleep(30)
-    print("Waiting 30 seconds")
-    time.sleep(30)
+    while True:
+        poll_respons = requests.post(status_url, headers=headers)
+        status = poll_respons.json()["status"]
+        print(f"Current training status: ", status)
+        if status is "done":
+            results = poll_respons.json()["data"]
+            break
+        print("Waiting 60 seconds")
+        time.sleep(60)
+
+    # print(results)
     
     # print("Active query time: ", format_timestamp())
-    active_energy = get_energy_consumption()
+    active_energy = get_energy_consumption(results["start"], results["end"])
     print(f"Active Energy: {active_energy} (in J)")
-    # print("Post request time: ", format_timestamp())
     
-    # Get the results from the logs of the api-gateway
-    logs = get_logs()
-    accuracies = parse_logs(logs)
-    save_accuracies(accuracies, output_dir)
-    print(f"Saved accuracy logs to {output_dir}")
+    # print(f"Saved accuracy logs to {output_dir}")
 
     # Calculate the difference between idle and active energy consumption
-    calculate_and_save_energy_difference(idle_energy, active_energy, output_dir)
+    # calculate_and_save_energy_difference(idle_energy, active_energy, output_dir)
 
 def save_results(results, output_dir):
     print("Saving experiment results to file...")
@@ -221,7 +229,7 @@ def save_results(results, output_dir):
 
 def format_timestamp():
     # Generate the current timestamp
-    timestamp = datetime.now().strftime("%y%m%d-%H%M%S")
+    timestamp = datetime.now().strftime("%d-%m-%y-%H%M%S")
     return timestamp
 
 

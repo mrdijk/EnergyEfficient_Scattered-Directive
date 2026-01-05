@@ -8,6 +8,7 @@ NODE_IP = "10.145.1.3"
 # See fabric/dynamos/DYNAMOS_setup.ipynb notebook for an example and more explanation on this.
 NODEPORT_BASE_URL = f"http://{NODE_IP}:32526"
 
+
 # Prometheus. The URL is specific to the FABRIC Kubernetes environment, so this should be changed if Kubernetes/FABRIC nodes have been reconfigured/recreated
 # Can be fetched with the following command to extract the NodePort from <LocalNodePort>:<NodePort>/TCP with: kubectl get svc prometheus-kube-prometheus-prometheus -n monitoring
 # See fabric/dynamos/DYNAMOS_setup.ipynb notebook for an example and more explanation on this.
@@ -33,12 +34,15 @@ DATA_PROVIDERS =  {'client1': 3799, 'client2': 10570, 'client3': 4725, 'client4'
 
 # Add specific FABRIC Kubernetes setup for these urls
 APPROVAL_URL = f"{NODEPORT_BASE_URL}/api/v1/requestApproval"
-HEADERS_APPROVAL = {
+HEADERS = {
     "Content-Type": "application/json",
     # Add specific host for this for FABRIC Kubernetes environment
     "Host": "api-gateway.api-gateway.svc.cluster.local"
 }
  
+# URL for polling the status of the current training
+STATUS_URL = f'http://{NODE_IP}:32526/api/v1/getTrainingStatus?id='
+
 #HFL request body
 HFL_REQUEST = {
     "type": "hflTrainModelRequest",

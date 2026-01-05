@@ -7,6 +7,7 @@ import torch.nn as nn
 import torch.optim as optim
 from collections import OrderedDict
 from sklearn.preprocessing import StandardScaler
+from typing import List
 import os
 
 # ---------------------- SET SEED FOR REPRODUCIBILITY ----------------------
@@ -17,13 +18,16 @@ torch.manual_seed(SEED)
 
 SERVER_PATH = '/home/maurits/EnergyEfficient_Scattered-Directive/python/hfl-train-model/datasets/courseData.csv'
 TRAINING_PATH = '/home/maurits/EnergyEfficient_Scattered-Directive/python/hfl-train-model/datasets/courseData.csv'
-
+DATA_PROVIDERS =  {'client1': 3799, 'client2': 10570, 'client3': 4725, 'client4': 2182, 'client5': 17938, 
+									  'client6': 2447, 'client7': 1681, 'client8': 1729, 'client9': 6896, 'client10': 14812, 
+									   'client12': 3746, 'client13': 4337, 'client14': 2146, 
+									  'client16': 1711, 'client17': 2094, 'client18': 3188, 'client20': 8281}
 # ----------------- Parse command line arguments -----------------
 parser = argparse.ArgumentParser(description="Run HFL with dynamic number of clients")
 parser.add_argument(
     "--clients", 
     type=int, 
-    default=20, 
+    default=len(DATA_PROVIDERS.keys()), 
     help="Number of clients to use in this run"
 )
 parser.add_argument(
@@ -34,22 +38,21 @@ parser.add_argument(
     )
 args = parser.parse_args()
 
-NOF_CLIENTS = args.clients
-print(f"Using {NOF_CLIENTS} clients for this run.")
+# NOF_CLIENTS = args.clients
+# print(f"Using {NOF_CLIENTS} clients for this run.")
 TOTAL_ROUNDS = args.rounds
 SERVER_CHECKPOINT_PATH = "server_state_hfl.pth"
 NOF_COMPLETED = 49030
 # Estimated CSV File Size Total: ~24000 KB
-# Estimated CSV File Size per Client for 20 clients: ~1200 KB
 
 
 # ---------------- MODEL ----------------
 class Model(nn.Module):
     def __init__(self, input_size):
         super(Model, self).__init__()
-        self.fc1 = nn.Linear(input_size, 40)
+        self.fc1 = nn.Linear(input_size, 32)
         self.relu = nn.ReLU()
-        self.fc2 = nn.Linear(40, 1)
+        self.fc2 = nn.Linear(32, 1)
 
     def forward(self, x):
         x = self.relu(self.fc1(x))
@@ -90,7 +93,7 @@ def parameters_to_ndarrays(state_dict):
 def ndarrays_to_state_dict(nd_list):
     sd = OrderedDict()
     for k, nd in nd_list:
-        sd[k] = torch.from_numpy(nd)
+        sd[k] = torch.from_numpy(nd).float()
     return sd
 
 # ---------------- CLIENT ----------------
@@ -108,7 +111,7 @@ class HFLClient:
                                 'Category_Encoded', 'Payment_Encoded']
         
         self.data = torch.tensor(data[self.feature_cols].values).float() 
-
+        self.data_size = len(self.data)
         self.model = Model(self.data.shape[1])
         if model_state is not None:
             self.model.load_state_dict(model_state)
@@ -139,10 +142,15 @@ class HFLClient:
     def evaluate(self):
         self.model.eval()
         with torch.no_grad():
-            outputs = self.model(self.data)
-            preds = (outputs > 0.5).float()
-            acc = (preds == self.labels).sum().item() / len(self.labels) * 100
-        return acc
+        #     outputs = self.model(self.data)
+        #     preds = (outputs > 0.5).float()
+        #     acc = (preds == self.labels).sum().item() / len(self.labels) * 100
+        # return acc
+            logits = self.model(self.data)
+            preds = torch.sigmoid(logits)
+            predicted = (preds > 0.5)
+            accuracy = (predicted == self.labels).sum().item() / len(self.labels)
+        return accuracy
 
     def get_update(self):
         return {
@@ -153,6 +161,9 @@ class HFLClient:
     def load_global(self, global_params):
         sd = ndarrays_to_state_dict(global_params)
         self.model.load_state_dict(sd)
+    
+    def get_data_size(self):
+        return len(self.data)
 
 # ---------------- SERVER ----------------
 class HFLServer:
@@ -168,10 +179,16 @@ class HFLServer:
                                 'Device_Encoded', 'Internet_Encoded', 'Level_Encoded',
                                 'Category_Encoded', 'Payment_Encoded']
         
+        # self.data = torch.tensor(data[self.feature_cols].values).float() 
+        # self.model = Model(self.data.shape[1])
+        # self.criterion = nn.BCEWithLogitsLoss()
+        # self.optimizer = optim.Adam(self.model.parameters(), lr=0.01)
         self.data = torch.tensor(data[self.feature_cols].values).float() 
         self.model = Model(self.data.shape[1])
-        self.criterion = nn.BCEWithLogitsLoss()
-        self.optimizer = optim.Adam(self.model.parameters(), lr=0.01)
+        # Loss with class balancing
+        pos_weight = torch.tensor([len(self.labels) / sum(self.labels) - 1])  # roughly inverse class ratio
+        self.criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=0.01)
 
     def get_model_size(self):
         param_size = 0
@@ -197,7 +214,11 @@ class HFLServer:
                 accum[k] += nd.astype(np.float64) * weight
 
         averaged = [(k, accum[k].astype(np.float32)) for k in keys]
-        self.model.load_state_dict(ndarrays_to_state_dict(averaged))
+        state_dict = OrderedDict()
+        for k, nd in averaged:
+            state_dict[k] = torch.from_numpy(nd)
+        self.model.load_state_dict(state_dict)
+        # self.model.load_state_dict(ndarrays_to_state_dict(averaged))
         return averaged
 
     def evaluate(self):
@@ -227,36 +248,22 @@ server_data = pd.read_csv(SERVER_PATH, delimiter=',', index_col=0)
 # TODO also split data with server
 client_datasets = []
 offset = 1
-# [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]
-# % 3 = [3,6,9,12,15,18]
-# % 2 = [2,4,6,8,10,12,14,16,18,20]
-# % 4 = [4,8,12,16,20]
-# for i in range(NOF_CLIENTS):
-#     # Number of rows per client
-#     num_rows = round(10000/NOF_CLIENTS)
-#     # Read num_rows, starting from the offset
-#     client_datasets.append(pd.read_csv(TRAINING_PATH, delimiter=',', index_col=0, nrows=num_rows, skiprows=range(1,(1 + offset))))
-#     # Increase the offset with the number of rows per client 
-#     offset += num_rows
-
-# Divide data among client using Power law: few clients with lots of data, many with little data
-alpha = 1.5
-sizes = np.random.pareto(alpha, NOF_CLIENTS) + 1
-# Normalize to sum to 100000
-sizes = [int(s * 100000 / sum(sizes)) for s in sizes]
-
-print(f"Min rows: {min(sizes)}, Max rows: {max(sizes)}, Mean: {np.mean(sizes):.0f}")
-
-offset = 1
-for i, num_rows in enumerate(sizes):
+row_counts =[3799, 10570, 4725, 2182, 17938, 2447, 1681, 1729, 6896, 14812, 2778, 3746, 4337, 2146, 2665, 1711, 2094, 3188, 2265, 8281]
+for row_count in row_counts:
     client_datasets.append(pd.read_csv(TRAINING_PATH, delimiter=',', index_col=0, 
-                                       nrows=num_rows, skiprows=range(1, offset)))
-    offset += num_rows
+                                       nrows=row_count, skiprows=range(1, offset)))
+    offset += row_count
+
+# print(client_datasets)
 
 # ---------------- CREATE CLIENTS ----------------
-clients = []
-for df in client_datasets[:NOF_CLIENTS]:
-    clients.append(HFLClient(df))
+clients: List[HFLClient] = []
+largest = [2,5,9,10,20]
+
+for i in largest:
+    clients.append(HFLClient(client_datasets[i-1]))
+# for df in client_datasets[:]
+#     clients.append(HFLClient(df))
 
 # ---------------- CREATE SERVER ----------------
 server = HFLServer(server_data)
@@ -284,6 +291,7 @@ for rnd in range(TOTAL_ROUNDS):
     client_accs = [client.evaluate() for client in clients]
     # print(f"Client accs: {client_accs}")
     server_acc, server_loss = server.evaluate()
+    client_sizes = [client.get_data_size() for client in clients]
     # , Client Accs: {[round(a,2) for a in client_accs]}
     print(f"Server Acc: {server_acc:.2f}, Server Loss: {server_loss:.2f}")
     print(f"Client Accs: {[round(a,2) for a in client_accs]}")
@@ -291,21 +299,21 @@ for rnd in range(TOTAL_ROUNDS):
         "round": rnd + 1,
         "server_accuracy": server_acc,
         "client_accuracies": client_accs,
-        "num_clients": NOF_CLIENTS
+        # "num_clients": NOF_CLIENTS
     })
 
 # ---------------- SAVE RESULTS ----------------
-payload = {
-    "metadata": {
-        "total_rounds": TOTAL_ROUNDS,
-        "num_clients": NOF_CLIENTS
-    },
-    "results": train_results
-}
+# payload = {
+#     "metadata": {
+#         "total_rounds": TOTAL_ROUNDS,
+#         "num_clients": NOF_CLIENTS
+#     },
+#     "results": train_results
+# }
 
-os.makedirs("./run_dumps", exist_ok=True)
-filename = f"./run_dumps/hfl_test_results_{NOF_CLIENTS}_clients_{TOTAL_ROUNDS}_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.json"
-print(f"Saving to file {filename}")
+# os.makedirs("./run_dumps", exist_ok=True)
+# filename = f"./run_dumps/hfl_test_results_{NOF_CLIENTS}_clients_{TOTAL_ROUNDS}_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.json"
+# print(f"Saving to file {filename}")
 # with open(filename, "w") as f:
 #     json.dump(payload, f, indent=2)
 

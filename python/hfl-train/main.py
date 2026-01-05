@@ -102,7 +102,7 @@ class HFLClient:
     - returns serialized model parameters
     - can load the global model from the server
     """
-    def __init__(self, data, learning_rate=0.01, model_state=None):
+    def __init__(self, data, learning_rate=0.001, model_state=None):
         self.labels = torch.tensor((data["Completed"] == "Completed").astype(int).values).float().unsqueeze(1)
         self.feature_cols = ['Age', 'Login_Frequency', 'Average_Session_Duration_Min', 'Video_Completion_Rate',
 									'Discussion_Participation', 'Time_Spent_Hours', 'Days_Since_Last_Login',

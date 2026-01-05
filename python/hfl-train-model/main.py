@@ -109,7 +109,7 @@ class HFLServer:
     - Evaluates aggregates model performance 
     - Sends back the averaged model parameters to the clients
     """
-    def __init__(self, data):
+    def __init__(self, data, learning_rate=0.01):
         self.labels = torch.tensor((data["Completed"] == "Completed").astype(int).values).float().unsqueeze(1)
         self.feature_cols = ['Age', 'Login_Frequency', 'Average_Session_Duration_Min', 'Video_Completion_Rate',
 									'Discussion_Participation', 'Time_Spent_Hours', 'Days_Since_Last_Login',
@@ -126,7 +126,7 @@ class HFLServer:
         # Loss with class balancing
         pos_weight = torch.tensor([len(self.labels) / sum(self.labels) - 1])  # roughly inverse class ratio
         self.criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=0.01)
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
 
     def aggregate_fit(self, client_updates):
         """
