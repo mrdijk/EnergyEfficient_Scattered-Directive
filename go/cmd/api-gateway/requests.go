@@ -80,11 +80,10 @@ type RoundMetrics struct {
 }
 
 type ExperimentData struct {
-	// JobID   string
-	startTime string
-	endTime string
-	Rounds  []RoundMetrics
-	mu      sync.Mutex
+	StartTime string         			 `json:"start_time"`
+    EndTime   string         			 `json:"end_time"`   
+    Rounds    []RoundMetrics 	 `json:"rounds"`
+    mu        sync.Mutex     			`json:"-"`
 }
 
 func (er *ExperimentData) SaveToCSV(filename string) error {
@@ -148,7 +147,7 @@ func requestHandler() http.HandlerFunc {
 			Data: &ExperimentData{
 				// JobID:  requestID,
 				Rounds: make([]RoundMetrics, 0),
-				startTime: time.Now().Format("02-01-06-15:04:05"),
+				StartTime: time.Now().Format("02-01-06-15:04:05"),
 			},
 		}
 		trainingRequests.Store(requestID, reqData)
@@ -156,7 +155,7 @@ func requestHandler() http.HandlerFunc {
 		resp := map[string]any{
 			"request_id": requestID,
 			"status":     StatusPending,
-			"startTime": reqData.Data.startTime,
+			"start_time": reqData.Data.StartTime,
 		}
 
 		logger.Sugar().Info("Accepted new job with id: ", activeJobID)
@@ -430,8 +429,9 @@ updateList := []string{}
 	}
 
 	wg.Wait()
-	duration := time.Duration(time.Since(start))
-	logger.Sugar().Infof("Round duration in seconds: %f", duration.Seconds())
+	// duration := time.Duration(time.Since(start)).Milliseconds()
+	duration := time.Since(start)
+	logger.Sugar().Infof("Round duration in ms: %f", duration)
 
 	return RoundMetrics{
 		GlobalAccuracy:    accuracy,
@@ -456,8 +456,6 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 	var wg sync.WaitGroup
 	results := &ExperimentData{
 	// JobID:  jobId,
-	startTime: "",
-	endTime: "",
 	Rounds: make([]RoundMetrics, 0),
 }
 	data, ok := dataRequest["data"].(map[string]any)
@@ -567,7 +565,7 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 	logger.Sugar().Info("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
 	logger.Sugar().Info("Running HFL for ", cycles, " rounds")
 	start := time.Now().Format(time.RFC3339)
-	results.startTime = start
+	results.StartTime = start
 
 	TrainLoop:
  		for round := int64(0); round < cycles; round++ {
@@ -637,7 +635,7 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 		}
 		results.Rounds = append(results.Rounds, RoundMetrics)
 
-		logger.Sugar().Infof("Round %d complete - Global Accuracy: %.4f, Duration[s]: %v",  round, RoundMetrics.GlobalAccuracy, RoundMetrics.RoundDuration.Seconds())
+		logger.Sugar().Infof("Round %d complete - Global Accuracy: %.4f, Duration[s]: %.4f",  round, RoundMetrics.GlobalAccuracy, RoundMetrics.RoundDuration.Seconds())
 		finalAccuracy = RoundMetrics.GlobalAccuracy
 		
 		if trainingFailed {
@@ -646,7 +644,7 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 	}
 
 	end := time.Now().Format(time.RFC3339)
-	results.endTime = end
+	results.EndTime = end
 		
 	// Save results to CSV
 // 	nClients :=(len(authorizedProviders)-1)
@@ -663,26 +661,7 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 	logger.Sugar().Info("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
 	// Shutdown all microservices
 
-	dataRequest["type"] = "hflShutdownRequest"
-	dataRequestJson, err = json.Marshal(dataRequest)
-	if err != nil {
-		logger.Sugar().Errorf("Error marshalling shutdown request: %v", err)
-		return []byte{}
-	}
 	
-	for auth, url := range authorizedProviders {
-		wg.Add(1)
-		target := strings.ToLower(auth)
-		endpoint := fmt.Sprintf("http://%s:8080/agent/v1/hflTrainRequest/%s", url, target)
-
-		go func(auth, endpoint string) {
-			logger.Sugar().Infof("-- Sending shutdown request to -> %s ", auth)
-			sendData(endpoint, dataRequestJson)
-			wg.Done()
-		}(auth, endpoint)
-	}
-
-	wg.Wait()
 	
 	logger.Sugar().Debug("test1")
 	
@@ -704,11 +683,6 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 	logger.Sugar().Debug("test2")
 	reqData := v.(TrainingRequestData)
 	reqData.Data = results
-	logger.Sugar().Debug("reqDat.Data: %s, %s", reqData.Data)
-	
-	logger.Sugar().Debug("results.startTime, results.endTime: %s, %s", results.startTime, results.endTime)
-	logger.Sugar().Debug("reqData.Data.startTime, reqData.Data.endTime: %s, %s", reqData.Data.startTime, reqData.Data.endTime)
-
 	if trainingFailed {
 		reqData.Status = StatusFailed
 	} else {
@@ -716,7 +690,7 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 	}
 	trainingRequests.Store(requestID, reqData)
 	logger.Sugar().Infow("Job completed", "requestID", requestID, "status", reqData.Status, "accuracy", finalAccuracy)
-	logger.Sugar().Debug("Start/End: %s, %s",reqData.Data.startTime, reqData.Data.endTime)
+	logger.Sugar().Debugf("Start/End: %s, %s",reqData.Data.StartTime, reqData.Data.EndTime)
 	new_response := map[string]any{
 		"request_id": requestID,
 		"status": reqData.Status,
@@ -736,6 +710,27 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 	}
 
 	logger.Sugar().Infof("Training results: ", string(responseJson))
+
+	dataRequest["type"] = "hflShutdownRequest"
+	dataRequestJson, err = json.Marshal(dataRequest)
+	if err != nil {
+		logger.Sugar().Errorf("Error marshalling shutdown request: %v", err)
+		return []byte{}
+	}
+	
+	for auth, url := range authorizedProviders {
+		wg.Add(1)
+		target := strings.ToLower(auth)
+		endpoint := fmt.Sprintf("http://%s:8080/agent/v1/hflTrainRequest/%s", url, target)
+
+		go func(auth, endpoint string) {
+			logger.Sugar().Infof("-- Sending shutdown request to -> %s ", auth)
+			sendData(endpoint, dataRequestJson)
+			wg.Done()
+		}(auth, endpoint)
+	}
+
+	wg.Wait()
 	return cleanupAndMarshalResponse(response)  // note this is not the same as responseJson
 }
 

@@ -62,7 +62,7 @@ def run_experiment(archetype: str, output_dir, exp_rep):
     for run in range(constants.NUM_EXP_ACTIONS):
         print(f"\nStarting action {run + 1}/{constants.NUM_EXP_ACTIONS}...")
         # Execute request approval
-        response_approval = requests.post(constants.APPROVAL_URL, json=constants.REQUEST_BODY_APPROVAL, headers=constants.HEADERS_APPROVAL)
+        response_approval = requests.post(constants.APPROVAL_URL, json=constants.REQUEST_BODY_APPROVAL, headers=constants.HEADERS)
         # Extract relevant data from the response
         status_code_approval = response_approval.status_code
         execution_time_approval = response_approval.elapsed.total_seconds()
