@@ -3,11 +3,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-# from matplotlib import cm
-
 # Load your experiment data
 OUTPUT_DIR = "analysis_output"
-global_data = pd.read_csv(f"{OUTPUT_DIR}/experiment_summary.csv")
+master = pd.read_csv(f"{OUTPUT_DIR}/experiment_summary.csv")
+global_data = pd.read_csv(f"{OUTPUT_DIR}/all_global_stats.csv")
 client_data = pd.read_csv(f"{OUTPUT_DIR}/all_client_stats.csv")
 energy_data = pd.read_csv(f"{OUTPUT_DIR}/all_energy_stats.csv")
 SORTED_CLIENTS = sorted(constants.DATA_PROVIDERS.items(), key=lambda x: x[1])
@@ -15,98 +14,122 @@ SORTED_CLIENTS = sorted(constants.DATA_PROVIDERS.items(), key=lambda x: x[1])
 # Filter out bad experiments if needed
 bad_experiments = ["13-01-26-1165414"]
 for bad_exp in bad_experiments:
-    if "experiment" in global_data.columns:
-        global_data = global_data[
-            ~global_data["experiment"].str.contains(bad_exp, na=False)
-        ].copy()
-
+    if "experiment" in master.columns:
+        master = master[~master["experiment"].str.contains(bad_exp, na=False)].copy()
 
 # Filter experiments with low energy
 energy_threshold = 100
-if "total_energy_joules" in global_data.columns:
-    global_data = global_data[
-        global_data["total_energy_joules"] > energy_threshold
-    ].copy()
+if "total_energy_joules" in master.columns:
+    master = master[master["total_energy_joules"] > energy_threshold].copy()
 
-# Prepare data for grouped bar chart
-# Group by clients and rounds
+# Add experiment size column if not present
+if "exp_size" not in master.columns:
+    master["exp_size"] = master["experiment"].str.extract(r"_(small|large)")
+
+# Prepare data for grouped bar chart - now including exp_size
 grouped = (
-    global_data.groupby(["clients", "rounds"])["total_energy_joules"]
+    master.groupby(["clients", "rounds", "exp_size"])["total_energy_joules"]
     .mean()
     .reset_index()
 )
+
 grouped["energy_kj"] = grouped["total_energy_joules"] / 1000
 
 # Get unique values
 unique_rounds = sorted(grouped["rounds"].unique())
 unique_clients = sorted(grouped["clients"].unique())
+unique_sizes = sorted(grouped["exp_size"].unique())
 
 print("=" * 80)
 print("GROUPED BAR CHART DATA")
 print("=" * 80)
 print(f"Client configurations: {unique_clients}")
 print(f"Round configurations: {unique_rounds}")
+print(f"Experiment sizes: {unique_sizes}")
 print("\nData overview:")
-print(grouped[["clients", "rounds", "energy_kj"]].to_string(index=False))
+print(grouped[["clients", "rounds", "exp_size", "energy_kj"]].to_string(index=False))
 
 # Create the grouped bar chart
-fig, ax = plt.subplots(figsize=(12, 7))
+fig, ax = plt.subplots(figsize=(14, 7))
 
 # Set the width of bars and positions
 x = np.arange(len(unique_rounds))
-width = 0.8 / len(unique_clients)  # Width of each bar
+width = 0.8 / (len(unique_clients) * len(unique_sizes))  # Width of each bar
 
 # Colors for different client counts
 colors = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899"]
 
-# Plot bars for each client configuration
+# Plot bars for each client configuration and size
+bar_index = 0
 for i, n_clients in enumerate(unique_clients):
-    # Get energy values for this client count across all rounds
-    values = []
-    for n_rounds in unique_rounds:
-        data_point = grouped[
-            (grouped["clients"] == n_clients) & (grouped["rounds"] == n_rounds)
-        ]
-        if not data_point.empty:
-            values.append(data_point["energy_kj"].values[0])
-        else:
-            values.append(0)
+    for j, exp_size in enumerate(unique_sizes):
+        # Get energy values for this client count and size across all rounds
+        values = []
+        errors = []
+        for n_rounds in unique_rounds:
+            data_point = grouped[
+                (grouped["clients"] == n_clients)
+                & (grouped["rounds"] == n_rounds)
+                & (grouped["exp_size"] == exp_size)
+            ]
+            if not data_point.empty:
+                values.append(data_point["energy_kj"].values[0])
+                # Calculate std from raw data if available
+                raw_data = master[
+                    (master["clients"] == n_clients)
+                    & (master["rounds"] == n_rounds)
+                    & (master["exp_size"] == exp_size)
+                ]["total_energy_joules"]
+                errors.append((raw_data.std() / 1000) if len(raw_data) > 1 else 0)
+            else:
+                values.append(0)
+                errors.append(0)
 
-        errors = np.std(values)
-    # Calculate position for this group of bars
-    position = x + (i - len(unique_clients) / 2 + 0.5) * width
-    # Create bars
-    bars = ax.bar(
-        position,
-        values,
-        width,
-        yerr=errors,
-        capsize=8,
-        label=f"{int(n_clients)} Clients",
-        color=colors[i % len(colors)],
-        alpha=0.85,
-        edgecolor="white",
-        linewidth=1.5,
-    )
+        # Calculate position for this group of bars
+        position = (
+            x
+            + (bar_index - (len(unique_clients) * len(unique_sizes)) / 2 + 0.5) * width
+        )
 
-    # Add value labels on bars
-    for bar in bars:
-        height = bar.get_height()
-        if height > 0:
-            ax.text(
-                bar.get_x() + bar.get_width() / 4.0,
-                height,
-                f"{height:.0f}",
-                ha="center",
-                va="bottom",
-                fontsize=9,
-                fontweight="bold",
-            )
+        # Create bars with different alpha for small vs large
+        alpha = 0.85 if exp_size == "large" else 0.5
+        label = f"{int(n_clients)} Clients - {exp_size}"
+
+        bars = ax.bar(
+            position,
+            values,
+            width,
+            yerr=errors,
+            capsize=3,
+            label=label,
+            color=colors[i % len(colors)],
+            alpha=alpha,
+            edgecolor="white",
+            linewidth=1.5,
+        )
+
+        # Add value labels on bars
+        for bar, err in zip(bars, errors):
+            height = bar.get_height()
+            if height > 0:
+                ax.text(
+                    bar.get_x() + bar.get_width() / 2.0,
+                    height + err + (max(values) * 0.02) if max(values) > 0 else 0,
+                    f"{height:.0f}",
+                    ha="center",
+                    va="bottom",
+                    fontsize=7,
+                    fontweight="bold",
+                )
+
+        bar_index += 1
 
 # Customize the chart
 ax.set_xlabel("Number of Rounds", fontsize=14, fontweight="bold", labelpad=10)
 ax.set_ylabel("Energy Consumption (kJ)", fontsize=14, fontweight="bold", labelpad=10)
-ax.set_title("Total Energy Consumption\n", fontsize=16, fontweight="bold", pad=20)
+ax.set_title(
+    "Total Energy Consumption by Size\n", fontsize=16, fontweight="bold", pad=20
+)
 
 # Set x-axis
 ax.set_xticks(x)
@@ -120,7 +143,7 @@ ax.grid(axis="y", alpha=0.3, linestyle="--", linewidth=0.8)
 ax.set_axisbelow(True)
 
 # Add legend
-ax.legend(loc="upper left", fontsize=11, framealpha=0.95, edgecolor="gray")
+ax.legend(loc="upper left", fontsize=9, framealpha=0.95, edgecolor="gray", ncol=2)
 
 # Add background color
 ax.set_facecolor("#f9fafb")
@@ -128,89 +151,124 @@ fig.set_facecolor("white")
 
 plt.tight_layout()
 plt.savefig(
-    f"{OUTPUT_DIR}/energy_grouped_bar_chart.png",
+    f"{OUTPUT_DIR}/energy_grouped_bar_chart_by_size.png",
     dpi=300,
     bbox_inches="tight",
     facecolor="white",
 )
 plt.show()
 
-# Create the grouped bar chart
-fig, ax = plt.subplots(figsize=(12, 7))
+# Create the grouped bar chart for energy per 1000 rows
+fig, ax = plt.subplots(figsize=(14, 7))
 
 print("=" * 80)
-print("GROUPED BAR CHART PER ROW")
+print("GROUPED BAR CHART PER 1000 ROWS")
 print("=" * 80)
 print(f"Client configurations: {unique_clients}")
 print(f"Round configurations: {unique_rounds}")
+print(f"Experiment sizes: {unique_sizes}")
 print("\nData overview:")
-for i, n_clients in enumerate(unique_clients):
+
+# Calculate energy per 1000 rows for each group
+grouped_per_row = grouped.copy()
+for i, row in grouped_per_row.iterrows():
+    n_clients = int(row["clients"])
     n_rows = np.sum([size for _, size in SORTED_CLIENTS[:n_clients]])
-    grouped["energy_per_row"] = grouped["total_energy_joules"] / n_rows
+    grouped_per_row.at[i, "energy_per_1k_rows"] = (row["energy_kj"] / n_rows) * 1000
 
-print(grouped[["clients", "rounds", "energy_per_row"]].to_string(index=False))
-
-# Create the grouped bar chart
-fig, ax = plt.subplots(figsize=(12, 7))
+print(
+    grouped_per_row[["clients", "rounds", "exp_size", "energy_per_1k_rows"]].to_string(
+        index=False
+    )
+)
 
 # Set the width of bars and positions
 x = np.arange(len(unique_rounds))
-width = 0.8 / len(unique_clients)  # Width of each bar
+width = 0.8 / (len(unique_clients) * len(unique_sizes))  # Width of each bar
 
 # Colors for different client counts
 colors = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899"]
 
-# Plot bars for each client configuration
+# Plot bars for each client configuration and size
+bar_index = 0
 for i, n_clients in enumerate(unique_clients):
     n_rows = np.sum([size for _, size in SORTED_CLIENTS[:n_clients]])
-    # Get energy values for this client count across all rounds
-    # number_of_clients = len(unique_clients)
-    values = []
-    for n_rounds in unique_rounds:
-        data_point = grouped[
-            (grouped["clients"] == n_clients) & (grouped["rounds"] == n_rounds)
-        ]
-        if not data_point.empty:
-            values.append((data_point["total_energy_joules"].values[0] / n_rows) * 1000)
-            # values.append(data_point["energy_per_row"].values[0] * 1000)
-        else:
-            values.append(0)
-        errors = np.std(values)
-    # Calculate position for this group of bars
-    position = x + (i - len(unique_clients) / 2 + 0.5) * width
 
-    # Create bars
-    bars = ax.bar(
-        position,
-        values,
-        width,
-        yerr=errors,
-        capsize=8,
-        label=f"{int(n_clients)} Clients",
-        color=colors[i % len(colors)],
-        alpha=0.85,
-        edgecolor="white",
-        linewidth=1.5,
-    )
+    for j, exp_size in enumerate(unique_sizes):
+        # Get energy values for this client count and size across all rounds
+        values = []
+        errors = []
+        for n_rounds in unique_rounds:
+            data_point = grouped_per_row[
+                (grouped_per_row["clients"] == n_clients)
+                & (grouped_per_row["rounds"] == n_rounds)
+                & (grouped_per_row["exp_size"] == exp_size)
+            ]
+            if not data_point.empty:
+                values.append(data_point["energy_per_1k_rows"].values[0])
+                # Calculate std from raw data if available
+                raw_data = master[
+                    (master["clients"] == n_clients)
+                    & (master["rounds"] == n_rounds)
+                    & (master["exp_size"] == exp_size)
+                ]["total_energy_joules"]
+                # Convert std to per 1k rows
+                errors.append(
+                    ((raw_data.std() / 1000) / n_rows * 1000)
+                    if len(raw_data) > 1
+                    else 0
+                )
+            else:
+                values.append(0)
+                errors.append(0)
 
-    # Add value labels on bars
-    for bar in bars:
-        height = bar.get_height()
-        if height > 0:
-            ax.text(
-                bar.get_x() + bar.get_width() / 4.0,
-                height,
-                f"{height:.0f}",
-                ha="center",
-                va="bottom",
-                fontsize=9,
-                fontweight="bold",
-            )
+        # Calculate position for this group of bars
+        position = (
+            x
+            + (bar_index - (len(unique_clients) * len(unique_sizes)) / 2 + 0.5) * width
+        )
+
+        # Create bars with different alpha for small vs large
+        alpha = 0.85 if exp_size == "large" else 0.5
+        label = f"{int(n_clients)} Clients - {exp_size}"
+
+        bars = ax.bar(
+            position,
+            values,
+            width,
+            yerr=errors,
+            capsize=3,
+            label=label,
+            color=colors[i % len(colors)],
+            alpha=alpha,
+            edgecolor="white",
+            linewidth=1.5,
+        )
+
+        # Add value labels on bars
+        for bar, err in zip(bars, errors):
+            height = bar.get_height()
+            if height > 0:
+                ax.text(
+                    bar.get_x() + bar.get_width() / 2.0,
+                    height + err + (max(values) * 0.02) if max(values) > 0 else 0,
+                    f"{height:.2f}",
+                    ha="center",
+                    va="bottom",
+                    fontsize=7,
+                    fontweight="bold",
+                )
+
+        bar_index += 1
 
 # Customize the chart
 ax.set_xlabel("Number of Rounds", fontsize=14, fontweight="bold", labelpad=10)
-ax.set_ylabel("Energy Consumption (kJ)", fontsize=14, fontweight="bold", labelpad=10)
-ax.set_title("Energy Consumption per 1k rows\n", fontsize=16, fontweight="bold", pad=20)
+ax.set_ylabel(
+    "Energy Consumption (kJ per 1k rows)", fontsize=14, fontweight="bold", labelpad=10
+)
+ax.set_title(
+    "Energy Consumption per 1000 Data Points\n", fontsize=16, fontweight="bold", pad=20
+)
 
 # Set x-axis
 ax.set_xticks(x)
@@ -224,7 +282,7 @@ ax.grid(axis="y", alpha=0.3, linestyle="--", linewidth=0.8)
 ax.set_axisbelow(True)
 
 # Add legend
-ax.legend(loc="upper left", fontsize=11, framealpha=0.95, edgecolor="gray")
+ax.legend(loc="upper left", fontsize=9, framealpha=0.95, edgecolor="gray", ncol=2)
 
 # Add background color
 ax.set_facecolor("#f9fafb")
@@ -232,68 +290,149 @@ fig.set_facecolor("white")
 
 plt.tight_layout()
 plt.savefig(
-    f"{OUTPUT_DIR}/grouped_bar_chart_per_row.png",
+    f"{OUTPUT_DIR}/energy_per_1k_rows_by_size.png",
     dpi=300,
     bbox_inches="tight",
     facecolor="white",
 )
 plt.show()
 
-# Print detailed statistics
-print("\n" + "=" * 80)
-print("DETAILED STATISTICS")
+# Prepare data for training time grouped bar chart
+training_time_grouped = (
+    global_data.groupby(["clients", "rounds", "size"])["TotalTrainingTime"]
+    .mean()
+    .reset_index()
+)
+
+# Add experiment size column if not present
+if "exp_size" not in training_time_grouped.columns:
+    training_time_grouped["exp_size"] = training_time_grouped["size"]
+
+# Convert to seconds for readability
+training_time_grouped["training_time_s"] = training_time_grouped["TotalTrainingTime"]
+
+# Get unique values
+unique_rounds_tt = sorted(training_time_grouped["rounds"].unique())
+unique_clients_tt = sorted(training_time_grouped["clients"].unique())
+unique_sizes_tt = sorted(training_time_grouped["exp_size"].unique())
+
 print("=" * 80)
-
-for n_rounds in unique_rounds:
-    print(f"\n{int(n_rounds)} Rounds:")
-    round_data = grouped[grouped["rounds"] == n_rounds]
-    for _, row in round_data.iterrows():
-        print(f"  {int(row['clients'])} Clients: {row['energy_kj']:.2f} kJ")
-
-print("\n" + "=" * 80)
-print("ENERGY SCALING ANALYSIS")
+print("TRAINING TIME GROUPED BAR CHART DATA")
 print("=" * 80)
+print(f"Client configurations: {unique_clients_tt}")
+print(f"Round configurations: {unique_rounds_tt}")
+print(f"Experiment sizes: {unique_sizes_tt}")
+print("\nData overview:")
+print(
+    training_time_grouped[
+        ["clients", "rounds", "exp_size", "TotalTrainingTime"]
+    ].to_string(index=False)
+)
 
-# Analyze scaling with rounds (keeping clients constant)
-print("\nEnergy scaling with ROUNDS (for each client config):")
-for n_clients in unique_clients:
-    client_data = grouped[grouped["clients"] == n_clients].sort_values("rounds")
-    if len(client_data) > 1:
-        energies = client_data["energy_kj"].values
-        rounds = client_data["rounds"].values
-        energy_per_round = energies / rounds
-        print(f"\n{int(n_clients)} Clients:")
-        for i, (r, e, epr) in enumerate(zip(rounds, energies, energy_per_round)):
-            print(f"  {int(r)} rounds: {e:.2f} kJ total, {epr:.2f} kJ/round")
+# Create the grouped bar chart for training time
+fig, ax = plt.subplots(figsize=(14, 7))
 
-        if len(energies) > 1:
-            avg_energy_per_round = np.mean(energy_per_round)
-            std_energy_per_round = np.std(energy_per_round)
-            print(
-                f"  → Avg energy/round: {avg_energy_per_round:.2f} ± {std_energy_per_round:.2f} kJ"
-            )
-            print(
-                f"  → Linearity: {'Good (±{:.1f}%)'.format(std_energy_per_round / avg_energy_per_round * 100) if std_energy_per_round / avg_energy_per_round < 0.1 else 'Variable (±{:.1f}%)'.format(std_energy_per_round / avg_energy_per_round * 100)}"
-            )
+# Set the width of bars and positions
+x = np.arange(len(unique_rounds_tt))
+width = 0.8 / (len(unique_clients_tt) * len(unique_sizes_tt))  # Width of each bar
 
-# Analyze scaling with clients (keeping rounds constant)
-print("\nEnergy scaling with CLIENTS (for each round config):")
-for n_rounds in unique_rounds:
-    round_data = grouped[grouped["rounds"] == n_rounds].sort_values("clients")
-    if len(round_data) > 1:
-        energies = round_data["energy_kj"].values
-        clients = round_data["clients"].values
-        energy_per_client = energies / clients
-        print(f"\n{int(n_rounds)} Rounds:")
-        for i, (c, e, epc) in enumerate(zip(clients, energies, energy_per_client)):
-            print(f"  {int(c)} clients: {e:.2f} kJ total, {epc:.2f} kJ/client")
+# Colors for different client counts
+colors = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899"]
 
-        if len(energies) > 1:
-            avg_energy_per_client = np.mean(energy_per_client)
-            std_energy_per_client = np.std(energy_per_client)
-            print(
-                f"  → Avg energy/client: {avg_energy_per_client:.2f} ± {std_energy_per_client:.2f} kJ"
-            )
-            print(
-                f"  → Linearity: {'Good (±{:.1f}%)'.format(std_energy_per_client / avg_energy_per_client * 100) if std_energy_per_client / avg_energy_per_client < 0.1 else 'Variable (±{:.1f}%)'.format(std_energy_per_client / avg_energy_per_client * 100)}"
-            )
+# Plot bars for each client configuration and size
+bar_index = 0
+for i, n_clients in enumerate(unique_clients_tt):
+    for j, exp_size in enumerate(unique_sizes_tt):
+        # Get training time values for this client count and size across all rounds
+        values = []
+        errors = []
+        for n_rounds in unique_rounds_tt:
+            data_point = training_time_grouped[
+                (training_time_grouped["clients"] == n_clients)
+                & (training_time_grouped["rounds"] == n_rounds)
+                & (training_time_grouped["exp_size"] == exp_size)
+            ]
+            if not data_point.empty:
+                values.append(data_point["TotalTrainingTime"].values[0])
+                # Calculate std from raw data if available
+                raw_data = global_data[
+                    (global_data["clients"] == n_clients)
+                    & (global_data["rounds"] == n_rounds)
+                    & (global_data["size"] == exp_size)
+                ]["TotalTrainingTime"]
+                errors.append(raw_data.std() if len(raw_data) > 1 else 0)
+            else:
+                values.append(0)
+                errors.append(0)
+
+        # Calculate position for this group of bars
+        position = (
+            x
+            + (bar_index - (len(unique_clients_tt) * len(unique_sizes_tt)) / 2 + 0.5)
+            * width
+        )
+
+        # Create bars with different alpha for small vs large
+        alpha = 0.85 if exp_size == "large" else 0.5
+        label = f"{int(n_clients)} Clients - {exp_size}"
+
+        bars = ax.bar(
+            position,
+            values,
+            width,
+            yerr=errors,
+            capsize=3,
+            label=label,
+            color=colors[i % len(colors)],
+            alpha=alpha,
+            edgecolor="white",
+            linewidth=1.5,
+        )
+
+        # Add value labels on bars
+        for bar, err in zip(bars, errors):
+            height = bar.get_height()
+            if height > 0:
+                ax.text(
+                    bar.get_x() + bar.get_width() / 2.0,
+                    height + err + (max(values) * 0.02) if max(values) > 0 else 0,
+                    f"{height:.0f}",
+                    ha="center",
+                    va="bottom",
+                    fontsize=7,
+                    fontweight="bold",
+                )
+
+        bar_index += 1
+
+# Customize the chart
+ax.set_xlabel("Number of Rounds", fontsize=14, fontweight="bold", labelpad=10)
+ax.set_ylabel("Training Time (ms)", fontsize=14, fontweight="bold", labelpad=10)
+ax.set_title("Total Training Time per Round\n", fontsize=16, fontweight="bold", pad=20)
+
+# Set x-axis
+ax.set_xticks(x)
+ax.set_xticklabels([f"{int(r)} Rounds" for r in unique_rounds_tt], fontsize=12)
+
+# Customize y-axis
+ax.tick_params(axis="y", labelsize=11)
+
+# Add grid
+ax.grid(axis="y", alpha=0.3, linestyle="--", linewidth=0.8)
+ax.set_axisbelow(True)
+
+# Add legend
+ax.legend(loc="upper left", fontsize=9, framealpha=0.95, edgecolor="gray", ncol=2)
+
+# Add background color
+ax.set_facecolor("#f9fafb")
+fig.set_facecolor("white")
+
+plt.tight_layout()
+plt.savefig(
+    f"{OUTPUT_DIR}/training_time_grouped_bar_chart.png",
+    dpi=300,
+    bbox_inches="tight",
+    facecolor="white",
+)
+plt.show()

@@ -199,120 +199,47 @@ print(df.groupby("group")["rows"].agg(["mean", "min", "max", "sum"]))
 # 5 smallest    1872.20  1681   2146   9361
 
 #  %% Cell 5
-# Melt the dataframe to long format for easier plotting
-df_melted = grouped_df.melt(
-    id_vars=["n_clients", "type"],
-    value_vars=["mean", "min", "max", "sum"],
-    var_name="statistic",
-    value_name="value",
-)
-
-# Create the plot
-fig, ax = plt.subplots(figsize=(10, 5))
-
-# Get unique values
-n_clients_unique = sorted(grouped_df["n_clients"].unique())
-stats = ["mean", "min", "max", "sum"]
-types = ["largest", "smallest"]
-
-# Set up bar positions
-x = np.arange(len(n_clients_unique))
-n_stats = len(stats)
-width = 0.4 / n_stats  # Width of each bar
-
-# Colors for each statistic
-colors = {"mean": "#3498db", "min": "#2ecc71", "max": "#e74c3c", "sum": "#f39c12"}
-
-# Plot bars
-for i, stat in enumerate(stats):
-    for j, type_ in enumerate(types):
-        data = (
-            grouped_df[(grouped_df["type"] == type_)]
-            .sort_values("n_clients")[stat]
-            .values
-        )
-        offset = (i * len(types) + j - (n_stats * len(types) - 1) / 2) * width
-
-        label = f"{stat} - {type_}"
-        bars = ax.bar(
-            x + offset,
-            data,
-            width,
-            label=label,
-            color=colors[stat],
-            alpha=0.8 if type_ == "largest" else 0.5,
-        )
-        # Add value labels on top of bars
-        for bar in bars:
-            height = bar.get_height()
-            ax.text(
-                bar.get_x() + bar.get_width() / 2.0,
-                height,
-                f"{height:.0f}",
-                ha="center",
-                va="bottom",
-                fontsize=7,
-                # rotation=90,
-            )
-
-ax.set_xlabel("Number of Clients", fontsize=12)
-ax.set_ylabel("Number of Rows", fontsize=12)
-ax.set_title(
-    "Row Statistics by Number of Clients and Experiment", fontsize=14, fontweight="bold"
-)
-ax.set_xticks(x)
-ax.set_xticklabels(n_clients_unique)
-ax.legend(bbox_to_anchor=(1.05, 1), loc="upper left", fontsize=9)
-ax.grid(axis="y", alpha=0.3)
-
-plt.tight_layout()
-plt.show()
-# %% Cell 6
 OUTPUT_DIR = "analysis_output"
-global_data = pd.read_csv(f"{OUTPUT_DIR}/experiment_summary.csv")
-client_data = pd.read_csv(f"{OUTPUT_DIR}/all_client_stats.csv")
-energy_data = pd.read_csv(f"{OUTPUT_DIR}/all_energy_stats.csv")
+master = pd.read_csv(f"{OUTPUT_DIR}/experiment_summary.csv")
+global_data = pd.read_csv(
+    "/home/maurits/EnergyEfficient_Scattered-Directive/fabric/experiments/analysis_output/all_global_stats.csv"
+)
+energy_data = pd.read_csv(
+    "/home/maurits/EnergyEfficient_Scattered-Directive/fabric/experiments/analysis_output/all_energy_stats.csv"
+)
 
 # %% Cell 7
-experiment_stats = pd.DataFrame()
-experiment_stats["total_time (s)"] = (
-    global_data.groupby("experiment")["RoundDuration"].sum() / 1000000
-)
-# print(Total_time)
+global_data["experiment_duration_m"] = global_data.groupby("experiment")[
+    "RoundDuration"
+].transform(lambda x: x.sum() / 1e9 / 60)
+# global_data.groupby("experiment").sum()
+print(global_data[global_data["experiment_duration_m"] < 1])
 
-#   %% Cell 8
-experiment_stats["total_joules (kj)"] = (
-    energy_data.groupby("experiment")["joules"].sum() / 1000
+# %% Cell 8
+duration_sum = global_data.groupby("experiment")["experiment_duration_m"].mean()
+master["experiment_duration_m"] = master["experiment"].map(duration_sum)
+
+# Identify short experiments (duration < 1 minute)
+mask = master["experiment_duration_m"] < 1
+
+# # Update joules column for short experiments only
+master.loc[mask, "total_energy_joules"] = (
+    master.loc[mask, "total_energy_joules"] * master.loc[mask, "experiment_duration_m"]
 )
+
+print(master[master["experiment_duration_m"] < 1])
 
 # %% Cell 9
-grouped = (
-    global_data.groupby(["clients", "rounds"])["total_energy_joules"]
-    .mean()
-    .reset_index()
+global_data["experiment_duration_m"] = global_data.groupby("experiment")[
+    "RoundDuration"
+].transform(lambda x: x.sum() / 1e9 / 60)
+
+duration_sum = global_data.groupby("experiment")["experiment_duration_m"].mean()
+master["experiment_duration_m"] = master["experiment"].map(duration_sum)
+# Identify short experiments (duration < 1 minute)
+mask = master["experiment_duration_m"] < 1
+
+# # Update joules column for short experiments only
+master.loc[mask, "total_energy_joules"] = (
+    master.loc[mask, "total_energy_joules"] * master.loc[mask, "experiment_duration_m"]
 )
-grouped["energy_kj"] = grouped["total_energy_joules"] / 1000
-unique_rounds = sorted(grouped["rounds"].unique())
-unique_clients = sorted(grouped["clients"].unique())
-
-for i, n_clients in enumerate(unique_clients):
-    # Get energy values for this client count across all rounds
-    number_of_clients = len(unique_clients)
-    values = []
-    for n_rounds in unique_rounds:
-        data_point = grouped[
-            (grouped["clients"] == n_clients) & (grouped["rounds"] == n_rounds)
-        ]
-        if not data_point.empty:
-            values.append(data_point["energy_kj"].values[0] / number_of_clients)
-        else:
-            values.append(0)
-
-    yerr = np.std(values)
-    print(yerr)
-# %% Cell 10
-import constants
-
-SORTED_CLIENTS = sorted(constants.DATA_PROVIDERS.items(), key=lambda x: x[1])
-size = np.sum([size for _, size in SORTED_CLIENTS[:5]])
-print(size)

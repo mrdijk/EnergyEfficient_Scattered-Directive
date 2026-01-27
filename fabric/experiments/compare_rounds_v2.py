@@ -96,8 +96,8 @@ if bad_exp_ids:
         print(f"  - {bad_exp}")
     if len(bad_exp_ids) > 10:
         print(f"  ... and {len(bad_exp_ids) - 10} more")
-if bad_experiments:
-    print(f"\nManually excluded experiments: {', '.join(bad_experiments)}")
+# if bad_experiments:
+#     print(f"\nManually excluded experiments: {', '.join(bad_experiments)}")
 
 
 experiments_rounds = master[master["rounds"] == ROUNDS_TO_COMPARE].copy()
