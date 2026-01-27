@@ -3,30 +3,29 @@ package main
 
 import (
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
-	"strconv"
-	"os"
-	"encoding/csv"
-	
 
 	"github.com/Jorrit05/DYNAMOS/pkg/api"
 	"github.com/Jorrit05/DYNAMOS/pkg/lib"
 	pb "github.com/Jorrit05/DYNAMOS/pkg/proto"
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"github.com/google/uuid"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.opencensus.io/trace"
 )
 
 const (
-    StatusPending = "pending"
-    StatusDone    = "done"
-    StatusFailed  = "failed"
+	StatusPending = "pending"
+	StatusDone    = "done"
+	StatusFailed  = "failed"
 )
 
 var (
@@ -36,8 +35,8 @@ var (
 )
 
 type TrainingRequestData struct {
-	Status   string
-	Data  *ExperimentData
+	Status string
+	Data   *ExperimentData
 	// Metadata map[string]any
 	// add more fields as needed
 }
@@ -57,7 +56,7 @@ func getTrainingStatusHandler() http.HandlerFunc {
 		resp := map[string]any{
 			"request_id": requestID,
 			"status":     reqData.Status,
-			"data":    reqData.Data,
+			"data":       reqData.Data,
 		}
 		respBytes, _ := json.MarshalIndent(resp, "", "    ")
 		w.WriteHeader(http.StatusOK)
@@ -68,22 +67,22 @@ func getTrainingStatusHandler() http.HandlerFunc {
 type ClientMetrics struct {
 	ClientID     string
 	Accuracy     float64
-	TrainingTime float64  // in milliseconds
+	TrainingTime float64 // in milliseconds
 }
 
 type RoundMetrics struct {
-	GlobalAccuracy      float64
-	AggregationTime     float64
-	TotalTrainingTime   float64
-	ClientMetrics       []ClientMetrics
-	RoundDuration       time.Duration
+	GlobalAccuracy    float64
+	AggregationTime   float64
+	TotalTrainingTime float64
+	ClientMetrics     []ClientMetrics
+	RoundDuration     time.Duration
 }
 
 type ExperimentData struct {
-	StartTime string         			 `json:"start_time"`
-    EndTime   string         			 `json:"end_time"`   
-    Rounds    []RoundMetrics 	 `json:"rounds"`
-    mu        sync.Mutex     			`json:"-"`
+	StartTime string         `json:"start_time"`
+	EndTime   string         `json:"end_time"`
+	Rounds    []RoundMetrics `json:"rounds"`
+	mu        sync.Mutex     `json:"-"`
 }
 
 func (er *ExperimentData) SaveToCSV(filename string) error {
@@ -97,7 +96,7 @@ func (er *ExperimentData) SaveToCSV(filename string) error {
 	defer writer.Flush()
 
 	// Write header
-	writer.Write([]string{"Round", "ClientID", "ClientAccuracy", "ClientTrainingTime_ms", 
+	writer.Write([]string{"Round", "ClientID", "ClientAccuracy", "ClientTrainingTime_ms",
 		"GlobalAccuracy", "AggregationTime_ms", "TotalTrainingTime_ms", "RoundDuration_ms"})
 
 	// Write data
@@ -146,7 +145,7 @@ func requestHandler() http.HandlerFunc {
 			Status: StatusPending,
 			Data: &ExperimentData{
 				// JobID:  requestID,
-				Rounds: make([]RoundMetrics, 0),
+				Rounds:    make([]RoundMetrics, 0),
 				StartTime: time.Now().Format("02-01-06-15:04:05"),
 			},
 		}
@@ -285,14 +284,14 @@ func startTraining(protoRequest *pb.RequestApproval, dataRequestInterface map[st
 
 func runHFLTrainingRound(dataRequest map[string]any, clients map[string]string, serverAuth, serverUrl string, learning_rate float64) (RoundMetrics, error) {
 	var wg sync.WaitGroup
-	var mu sync.Mutex  // Add mutex
+	var mu sync.Mutex // Add mutex
 	clientUpdates := map[string]string{}
 	clientMetricsList := []ClientMetrics{}
 	var total_time_per_round float64 = 0.0
 
 	start := time.Now()
 
-	// Ask each client to train locally 
+	// Ask each client to train locally
 	for auth, url := range clients {
 		wg.Add(1)
 		target := strings.ToLower(auth)
@@ -314,8 +313,6 @@ func runHFLTrainingRound(dataRequest map[string]any, clients map[string]string, 
 			return RoundMetrics{}, err
 		}
 
-		
-
 		go func(auth string, endpoint string) {
 			defer wg.Done()
 			logger.Sugar().Infof("Sending training request to: %s", auth)
@@ -336,7 +333,7 @@ func runHFLTrainingRound(dataRequest map[string]any, clients map[string]string, 
 			dataJson := responseJson.Data.AsMap()
 			modelUpdate, ok := dataJson["model_update"].(string)
 			client_accuracy := dataJson["accuracy"].(float64)
-			training_duration := dataJson["ts"].(float64)
+			training_duration := dataJson["t_train"].(float64)
 			// Use mutex to update to avoid race condition
 			mu.Lock()
 			total_time_per_round += training_duration
@@ -363,11 +360,11 @@ func runHFLTrainingRound(dataRequest map[string]any, clients map[string]string, 
 	wg.Wait()
 
 	logger.Sugar().Infof("Total training time for this round[ms]: %f", total_time_per_round)
-	// Send all client model updates to server for aggregation 
+	// Send all client model updates to server for aggregation
 	target := strings.ToLower(serverAuth)
 	serverEndpoint := fmt.Sprintf("http://%s:8080/agent/v1/hflTrainRequest/%s", serverUrl, target)
 
-updateList := []string{}
+	updateList := []string{}
 	for _, update := range clientUpdates {
 		updateList = append(updateList, update)
 	}
@@ -396,12 +393,12 @@ updateList := []string{}
 	}
 
 	accuracy := serverResponse.Data.GetFields()["accuracy"].GetNumberValue()
-	aggregation_duration := serverResponse.Data.GetFields()["ts"].GetNumberValue()
+	aggregation_duration := serverResponse.Data.GetFields()["t_agg"].GetNumberValue()
 	// logger.Sugar().Infof("Aggregration durarion: %f ms", aggregation_duration)
 	// loss := serverResponse.Data.GetFields()["loss"].GetNumberValue()
 	globalParams := serverResponse.Data.GetFields()["global_params"].GetStringValue()
 
-	// Send the new global model to all clients 
+	// Send the new global model to all clients
 	for auth, url := range clients {
 		wg.Add(1)
 		target := strings.ToLower(auth)
@@ -455,9 +452,9 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 
 	var wg sync.WaitGroup
 	results := &ExperimentData{
-	// JobID:  jobId,
-	Rounds: make([]RoundMetrics, 0),
-}
+		// JobID:  jobId,
+		Rounds: make([]RoundMetrics, 0),
+	}
 	data, ok := dataRequest["data"].(map[string]any)
 	logger.Sugar().Info("Data from req: ", data)
 
@@ -500,17 +497,14 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 
 	var noPing bool = false
 	var noPingAuth []string
-	
+
 	// logger.Sugar().Info("providers: ", authorizedProviders)
 
 	for auth, url := range authorizedProviders {
-		// logger.Sugar().Infof("provider: %s", auth)
-		
 		wg.Add(1)
 
 		target := strings.ToLower(auth)
 		endpoint := fmt.Sprintf("http://%s:8080/agent/v1/hflTrainRequest/%s", url, target)
-		// logger.Sugar().Infof("Endpoint: %s", endpoint)
 
 		go func(auth string, endpoint string) {
 			logger.Sugar().Infof("Sending Ping to %s", auth)
@@ -523,7 +517,8 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 
 				if i == 4 {
 					noPing = true
-					noPingAuth = append(noPingAuth, auth)
+					break
+					// noPingAuth = append(noPingAuth, auth)
 				}
 			}
 
@@ -533,16 +528,38 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 
 	wg.Wait()
 
+	// If a client doesn't start, stop training and set status to "Failed" and shutdown all clients
 	if noPing {
 		logger.Sugar().Errorf("No ping from %s.", noPingAuth)
-		// 
+		v, ok := trainingRequests.Load(requestID)
+
+		if !ok {
+			logger.Sugar().Error("Could not find the training request to update status.")
+			return []byte{}
+		}
+
+		reqData := v.(TrainingRequestData)
+		reqData.Status = StatusFailed
+		trainingRequests.Store(requestID, reqData)
+
+		logger.Sugar().Infow("Training failed", "requestID", requestID, "status", reqData.Status)
+		failed_response := map[string]any{
+			"request_id": requestID,
+			"status":     reqData.Status,
+		}
+
+		// Release the active job lock
+		activeJobLock.Lock()
+		activeJobID = ""
+		activeJobLock.Unlock()
+
 		dataRequest["type"] = "hflShutdownRequest"
 		dataRequestJson, err = json.Marshal(dataRequest)
 		if err != nil {
 			logger.Sugar().Errorf("Error marshalling shutdown request: %v", err)
 			return []byte{}
 		}
-		
+
 		for auth, url := range authorizedProviders {
 			wg.Add(1)
 			target := strings.ToLower(auth)
@@ -557,7 +574,8 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 
 		wg.Wait()
 
-		return []byte{}
+		// return []byte{}
+		return cleanupAndMarshalResponse(failed_response)
 	}
 
 	logger.Sugar().Info("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
@@ -567,8 +585,8 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 	start := time.Now().Format(time.RFC3339)
 	results.StartTime = start
 
-	TrainLoop:
- 		for round := int64(0); round < cycles; round++ {
+TrainLoop:
+	for round := int64(0); round < cycles; round++ {
 		logger.Sugar().Info("Running HFL training round ", round)
 
 		protoRequest := &pb.RequestApproval{
@@ -635,9 +653,9 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 		}
 		results.Rounds = append(results.Rounds, RoundMetrics)
 
-		logger.Sugar().Infof("Round %d complete - Global Accuracy: %.4f, Duration[s]: %.4f",  round, RoundMetrics.GlobalAccuracy, RoundMetrics.RoundDuration.Seconds())
+		logger.Sugar().Infof("Round %d complete - Global Accuracy: %.4f, Duration[s]: %.4f", round, RoundMetrics.GlobalAccuracy, RoundMetrics.RoundDuration.Seconds())
 		finalAccuracy = RoundMetrics.GlobalAccuracy
-		
+
 		if trainingFailed {
 			break
 		}
@@ -645,42 +663,26 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 
 	end := time.Now().Format(time.RFC3339)
 	results.EndTime = end
-		
-	// Save results to CSV
-// 	nClients :=(len(authorizedProviders)-1)
-// 	now := time.Now()
-// 	filename := fmt.Sprintf("%d_%d_%s.csv", nClients, cycles, now.Format("02-01-06-150405"))
-// 	if err := results.SaveToCSV(filename); err != nil {
-// 		logger.Sugar().Errorf("Failed to save results to CSV: %v", err)
-// 	}
-// logger.Sugar().Infof("Saved results to: %s", filename)
 
-	
 	logger.Sugar().Info("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
 	logger.Sugar().Info("Final accuracy achieved: ", finalAccuracy)
 	logger.Sugar().Info("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
-	// Shutdown all microservices
 
-	
-	
-	logger.Sugar().Debug("test1")
-	
 	response := map[string]any{
 		"jobId":    jobId,
 		"accuracy": finalAccuracy,
-		"start": start,
-		"end": end,
+		"start":    start,
+		"end":      end,
 	}
 
 	// --- SET STATUS and UNLOCK ---
 	v, ok := trainingRequests.Load(requestID)
-	
+
 	if !ok {
 		logger.Sugar().Error("Could not find the training request to update status.")
 		return []byte{}
 	}
-	
-	logger.Sugar().Debug("test2")
+
 	reqData := v.(TrainingRequestData)
 	reqData.Data = results
 	if trainingFailed {
@@ -690,19 +692,18 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 	}
 	trainingRequests.Store(requestID, reqData)
 	logger.Sugar().Infow("Job completed", "requestID", requestID, "status", reqData.Status, "accuracy", finalAccuracy)
-	logger.Sugar().Debugf("Start/End: %s, %s",reqData.Data.StartTime, reqData.Data.EndTime)
 	new_response := map[string]any{
 		"request_id": requestID,
-		"status": reqData.Status,
-		"data": reqData.Data,
+		"status":     reqData.Status,
+		"data":       reqData.Data,
 	}
+
 	// Release the active job lock
 	activeJobLock.Lock()
 	activeJobID = ""
 	activeJobLock.Unlock()
 
 	// Marshal and return
-	logger.Sugar().Debug("test3")
 	responseJson, err := json.MarshalIndent(new_response, "", "    ")
 	if err != nil {
 		logger.Sugar().Errorf("Error marshalling training results: %v", err)
@@ -717,7 +718,7 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 		logger.Sugar().Errorf("Error marshalling shutdown request: %v", err)
 		return []byte{}
 	}
-	
+
 	for auth, url := range authorizedProviders {
 		wg.Add(1)
 		target := strings.ToLower(auth)
@@ -731,9 +732,8 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 	}
 
 	wg.Wait()
-	return cleanupAndMarshalResponse(response)  // note this is not the same as responseJson
+	return cleanupAndMarshalResponse(response) // note this is not the same as responseJson
 }
-
 
 func runVFLTrainingRound(dataRequest map[string]any, clients map[string]string, serverAuth string, serverUrl string, learning_rate float64) (float64, error) {
 	var wg sync.WaitGroup

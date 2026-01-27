@@ -1,0 +1,137 @@
+================================================================================
+ENERGY CONSUMPTION ANALYSIS
+================================================================================
+
+Total Energy by Namespace:
+  client10            :    2040.91 J (2.041 kJ)
+  client5             :    1794.01 J (1.794 kJ)
+  client2             :    1671.88 J (1.672 kJ)
+  server              :    1595.36 J (1.595 kJ)
+  client17            :    1113.26 J (1.113 kJ)
+  client18            :    1096.47 J (1.096 kJ)
+  client12            :    1051.73 J (1.052 kJ)
+  client16            :    1018.40 J (1.018 kJ)
+  client9             :    1017.79 J (1.018 kJ)
+  client7             :    1012.70 J (1.013 kJ)
+  client4             :    1005.80 J (1.006 kJ)
+  client19            :     989.45 J (0.989 kJ)
+  client11            :     966.31 J (0.966 kJ)
+  orchestrator        :     960.55 J (0.961 kJ)
+  client3             :     959.52 J (0.960 kJ)
+  client13            :     953.74 J (0.954 kJ)
+  client1             :     952.58 J (0.953 kJ)
+  client8             :     907.52 J (0.908 kJ)
+  client15            :     897.90 J (0.898 kJ)
+  client6             :     879.88 J (0.880 kJ)
+  client20            :     837.52 J (0.838 kJ)
+  client14            :     828.26 J (0.828 kJ)
+  api-gateway         :     485.33 J (0.485 kJ)
+
+Total Energy by Container Type:
+  sidecar             :    8200.79 J
+  linkerd-proxy       :    7147.11 J
+  hfl-train           :    1386.17 J
+  hfl-train-model     :    1142.03 J
+  client17            :     371.33 J
+  client18            :     365.67 J
+  client12            :     350.87 J
+  client16            :     339.67 J
+  client9             :     339.47 J
+  client7             :     337.87 J
+  client4             :     335.51 J
+  client19            :     330.10 J
+  client10            :     328.91 J
+  client11            :     322.62 J
+  client3             :     320.33 J
+  client13            :     318.23 J
+  client1             :     317.82 J
+  client8             :     315.09 J
+  client15            :     299.55 J
+  client6             :     293.59 J
+  client14            :     288.57 J
+  client5             :     284.55 J
+  client20            :     279.75 J
+  client2             :     269.36 J
+  server              :     266.82 J
+  api-gateway         :     164.41 J
+  orchestrator        :     160.61 J
+  policy-enforcer     :     160.09 J
+
+Client Main Container Energy:
+  client17            :     371.33 J
+  client18            :     365.67 J
+  client12            :     350.87 J
+  client16            :     339.67 J
+  client9             :     339.47 J
+  client7             :     337.87 J
+  client4             :     335.51 J
+  client19            :     330.10 J
+  client10            :     328.91 J
+  client11            :     322.62 J
+  client3             :     320.33 J
+  client13            :     318.23 J
+  client1             :     317.82 J
+  client8             :     315.09 J
+  client15            :     299.55 J
+  client6             :     293.59 J
+  client14            :     288.57 J
+  client5             :     284.55 J
+  client20            :     279.75 J
+  client2             :     269.36 J
+
+Total System Energy: 25036.86 J (25.037 kJ)
+
+================================================================================
+TRAINING PERFORMANCE ANALYSIS
+================================================================================
+
+Client Performance Summary:
+
+client5:
+  Average Accuracy: 0.5595
+  Final Accuracy:   0.5268
+  Avg Training Time: 790.95 seconds
+  Improvement: +2.51%
+
+client2:
+  Average Accuracy: 0.5653
+  Final Accuracy:   0.5232
+  Avg Training Time: 508.97 seconds
+  Improvement: -2.74%
+
+client10:
+  Average Accuracy: 0.5751
+  Final Accuracy:   0.5814
+  Avg Training Time: 644.94 seconds
+  Improvement: +0.33%
+
+Global Model Performance:
+  Initial Accuracy: 0.50322
+  Final Accuracy:   0.55475
+  Best Accuracy:    0.59788 (Round 8)
+  Improvement:      +10.24%
+
+  Avg Aggregation Time: 9.39 seconds
+  Avg Round Duration:   7.09 seconds
+
+================================================================================
+ENERGY EFFICIENCY ANALYSIS
+================================================================================
+
+client5:
+  Total Energy: 1794.01 J
+  Total Training Time: 7909.45 seconds
+  Energy per Second: 0.2268 J/s
+  Energy per Accuracy Point: 3405.75 J
+
+client2:
+  Total Energy: 1671.88 J
+  Total Training Time: 5089.73 seconds
+  Energy per Second: 0.3285 J/s
+  Energy per Accuracy Point: 3195.61 J
+
+client10:
+  Total Energy: 2040.91 J
+  Total Training Time: 6449.40 seconds
+  Energy per Second: 0.3164 J/s
+  Energy per Accuracy Point: 3510.62 J

@@ -229,7 +229,7 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication,
                 data.update({"accuracy": acc})
                 training_time = (time.perf_counter() - start) * 1000
                 logger.info(f"Training time: {training_time:.2f}ms")
-                data.update({"ts": training_time})
+                data.update({"t_train": training_time})
                 ms_config.next_client.ms_comm.send_data(msComm, data, {})
 
             elif request.type == "hflLoadGlobalModel":
@@ -241,9 +241,9 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication,
                     data = Struct()
                     data.update({"global_params": global_params })
                     end = datetime.now()
-                    loading_trime = (end- start).total_seconds() * 10**3
-                    logger.info(f"Loading time: {loading_trime}ms")
-                    data.update({"ts": loading_trime})
+                    loading_time = (end- start).total_seconds() * 10**3
+                    logger.info(f"Loading time: {loading_time}ms")
+                    data.update({"t_load": loading_time})
                 except Exception as e:
                     logger.error(f"Failed to load global model: {e}")
                     data = Struct()

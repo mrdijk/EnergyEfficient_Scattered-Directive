@@ -205,7 +205,7 @@ def handleAggregateRequest(msComm):
     agg_result = hfl_server.aggregate_fit(client_updates)
     agg_duration =  (time.perf_counter() - start) * 1000
     logger.info(f"Aggregation duration: {agg_duration:.2f}ms")
-    agg_result.update({"ts": agg_duration})
+    agg_result.update({"t_agg": agg_duration})
     ms_config.next_client.ms_comm.send_data(msComm, agg_result, {})
 
 

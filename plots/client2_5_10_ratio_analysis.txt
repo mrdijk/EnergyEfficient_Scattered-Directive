@@ -1,0 +1,89 @@
+================================================================================
+DETAILED ENERGY BREAKDOWN BY CONTAINER TYPE
+================================================================================
+
+CLIENT2 Energy Breakdown:
+  Dataset Size: 10570 rows
+  Mean Training Time: 508973.28 ms
+  Total Energy: 1671.88 J
+
+  By Container:
+    client2             :   269.36 J ( 16.1%)
+    hfl-train           :   337.47 J ( 20.2%)
+    hfl-train-model     :   265.81 J ( 15.9%)
+    linkerd-proxy       :   267.36 J ( 16.0%)
+    sidecar             :   531.88 J ( 31.8%)
+
+CLIENT5 Energy Breakdown:
+  Dataset Size: 17938 rows
+  Mean Training Time: 790945.38 ms
+  Total Energy: 1794.01 J
+
+  By Container:
+    client5             :   284.55 J ( 15.9%)
+    hfl-train           :   378.56 J ( 21.1%)
+    hfl-train-model     :   282.64 J ( 15.8%)
+    linkerd-proxy       :   283.21 J ( 15.8%)
+    sidecar             :   565.05 J ( 31.5%)
+
+CLIENT10 Energy Breakdown:
+  Dataset Size: 14812 rows
+  Mean Training Time: 644939.85 ms
+  Total Energy: 2040.91 J
+
+  By Container:
+    client10            :   328.91 J ( 16.1%)
+    hfl-train           :   405.13 J ( 19.9%)
+    hfl-train-model     :   326.52 J ( 16.0%)
+    linkerd-proxy       :   327.53 J ( 16.0%)
+    sidecar             :   652.82 J ( 32.0%)
+
+================================================================================
+RATIO ANALYSIS
+================================================================================
+
+1. CLIENT2 vs CLIENT5:
+   Data Ratio:          0.589 (10570/17938)
+   Training Time Ratio: 0.643 (508973/790945 ms)
+   Energy Ratio:        0.932 (1672/1794 J)
+   Time/Data Alignment: 1.092 (close to 1.0 = proportional)
+   Energy/Data Alignment: 1.582 (close to 1.0 = proportional)
+   Energy/Time Alignment: 1.448 (close to 1.0 = proportional)
+
+2. CLIENT2 vs CLIENT10:
+   Data Ratio:          0.714 (10570/14812)
+   Training Time Ratio: 0.789 (508973/644940 ms)
+   Energy Ratio:        0.819 (1672/2041 J)
+   Time/Data Alignment: 1.106 (close to 1.0 = proportional)
+   Energy/Data Alignment: 1.148 (close to 1.0 = proportional)
+   Energy/Time Alignment: 1.038 (close to 1.0 = proportional)
+
+3. CLIENT10 vs CLIENT5:
+   Data Ratio:          0.826 (14812/17938)
+   Training Time Ratio: 0.815 (644940/790945 ms)
+   Energy Ratio:        1.138 (2041/1794 J)
+   Time/Data Alignment: 0.987 (close to 1.0 = proportional)
+   Energy/Data Alignment: 1.378 (close to 1.0 = proportional)
+   Energy/Time Alignment: 1.395 (close to 1.0 = proportional)
+
+================================================================================
+ENERGY COMPONENT ANALYSIS
+================================================================================
+
+CLIENT2:
+  Training-related Energy:        872.64 J ( 52.2%)
+  Infrastructure Energy:          799.24 J ( 47.8%)
+  Energy per Training Second:   1.71 J/s
+  Energy per Data Point:        0.1582 J/row
+
+CLIENT5:
+  Training-related Energy:        945.75 J ( 52.7%)
+  Infrastructure Energy:          848.26 J ( 47.3%)
+  Energy per Training Second:   1.20 J/s
+  Energy per Data Point:        0.1000 J/row
+
+CLIENT10:
+  Training-related Energy:       1060.56 J ( 52.0%)
+  Infrastructure Energy:          980.35 J ( 48.0%)
+  Energy per Training Second:   1.64 J/s
+  Energy per Data Point:        0.1378 J/row

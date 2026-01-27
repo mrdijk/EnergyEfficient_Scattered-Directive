@@ -1,30 +1,53 @@
-import pandas as pd
 from glob import glob
 from pathlib import Path
-import matplotlib.pyplot as plt
 
-DATA_DIR = "/home/maurits/EnergyEfficient_Scattered-Directive/fabric/data"
+import pandas as pd
+
+# import matplotlib.pyplot as plt
+
+DATA_DIR = (
+    "/home/maurits/EnergyEfficient_Scattered-Directive/fabric/data/experiment_data"
+)
 OUTPUT_DIR = "analysis_output"
 Path(OUTPUT_DIR).mkdir(exist_ok=True)
 
 # Dataset sizes per client
 DATA_PROVIDERS = {
-    'client1': 3799, 'client2': 10570, 'client3': 4725, 'client4': 2182, 'client5': 17938, 
-    'client6': 2447, 'client7': 1681, 'client8': 1729, 'client9': 6896, 'client10': 14812, 
-    'client12': 3746, 'client13': 4337, 'client14': 2146, 
-    'client16': 1711, 'client17': 2094, 'client18': 3188, 'client20': 8281
+    "client1": 3799,
+    "client2": 10570,
+    "client3": 4725,
+    "client4": 2182,
+    "client5": 17938,
+    "client6": 2447,
+    "client7": 1681,
+    "client8": 1729,
+    "client9": 6896,
+    "client10": 14812,
+    "client11": 2778,
+    "client12": 3746,
+    "client13": 4337,
+    "client14": 2146,
+    "client15": 2665,
+    "client16": 1711,
+    "client17": 2094,
+    "client18": 3188,
+    "client19": 2265,
+    "client20": 8281,
 }
+
 
 def extract_meta(file_path):
     p = Path(file_path)
 
-    timestamp = p.parent.name
-    rounds = int(p.parent.parent.name)
-    clients = int(p.parent.parent.parent.name)
+    size = p.parent.name
+    timestamp = p.parent.parent.name
+    rounds = int(p.parent.parent.parent.name)
+    clients = int(p.parent.parent.parent.parent.name)
 
-    experiment = f"C{clients}_R{rounds}_{timestamp}"
+    experiment = f"C{clients}_R{rounds}_{timestamp}_{size}"
 
     return clients, rounds, timestamp, experiment
+
 
 def load_csv_flexible(file_path):
     """
@@ -33,18 +56,19 @@ def load_csv_flexible(file_path):
     """
     # First, peek at the file to check structure
     df_peek = pd.read_csv(file_path, nrows=5)
-    
+
     # Check if first column looks like an index (unnamed or numeric sequence)
     first_col = df_peek.columns[0]
-    
+
     # If first column is 'Unnamed: 0' or empty, it's likely an index column
-    if first_col.startswith('Unnamed') or first_col == '':
+    if first_col.startswith("Unnamed") or first_col == "":
         df = pd.read_csv(file_path, index_col=0)
     else:
         # Otherwise, read normally
         df = pd.read_csv(file_path)
-    
+
     return df
+
 
 print("Loading global stats...")
 
@@ -55,7 +79,7 @@ global_all = []
 for f in global_files:
     try:
         df = load_csv_flexible(f)
-        
+
         clients, rounds, ts, exp = extract_meta(f)
 
         df["clients"] = clients
@@ -80,7 +104,7 @@ client_all = []
 for f in client_files:
     try:
         df = load_csv_flexible(f)
-        
+
         clients, rounds, ts, exp = extract_meta(f)
 
         df["clients"] = clients
@@ -134,45 +158,41 @@ print("Computing global summaries...")
 # Check if we have a Round column (might be capitalized differently)
 round_col = None
 for col in global_df.columns:
-    if col.lower() == 'round':
+    if col.lower() == "round":
         round_col = col
         break
 
 if round_col:
-    final_global = (
-        global_df
-        .sort_values(round_col)
-        .groupby("experiment")
-        .tail(1)
-    )
+    final_global = global_df.sort_values(round_col).groupby("experiment").tail(1)
 else:
     # If no Round column, just take unique experiments
     print("Warning: No Round column found in global_df")
-    final_global = global_df.drop_duplicates(subset=['experiment'], keep='last')
+    final_global = global_df.drop_duplicates(subset=["experiment"], keep="last")
 
-final_global = final_global[[
-    "experiment",
-    "clients",
-    "rounds",
-    "GlobalAccuracy",
-    "TotalTrainingTime",
-    "AggregationTime",
-    "RoundDuration"
-]]
+final_global = final_global[
+    [
+        "experiment",
+        "clients",
+        "rounds",
+        "GlobalAccuracy",
+        "TotalTrainingTime",
+        "AggregationTime",
+        "RoundDuration",
+    ]
+]
 
 print("Computing client fairness...")
 
 # Check for Round column in client_df
 round_col_client = None
 for col in client_df.columns:
-    if col.lower() == 'round':
+    if col.lower() == "round":
         round_col_client = col
         break
 
 if round_col_client:
     fairness = (
-        client_df
-        .groupby(["experiment", round_col_client])["ClientAccuracy"]
+        client_df.groupby(["experiment", round_col_client])["ClientAccuracy"]
         .std()
         .groupby("experiment")
         .mean()
@@ -181,8 +201,7 @@ if round_col_client:
 else:
     print("Warning: No Round column found in client_df")
     fairness = (
-        client_df
-        .groupby("experiment")["ClientAccuracy"]
+        client_df.groupby("experiment")["ClientAccuracy"]
         .std()
         .reset_index(name="avg_client_accuracy_std")
     )
@@ -195,8 +214,7 @@ else:
 print("Computing energy usage...")
 
 energy_summary = (
-    energy_df
-    .groupby("experiment")["joules"]
+    energy_df.groupby("experiment")["joules"]
     .sum()
     .reset_index(name="total_energy_joules")
 )
