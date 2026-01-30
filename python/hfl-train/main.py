@@ -1,29 +1,28 @@
-import pandas as pd
-import numpy as np
-import sys
-import os
 import json
+import os
+import sys
+import threading
+import time
+from collections import OrderedDict
+from datetime import datetime
+
+import microserviceCommunication_pb2 as msCommTypes
+import numpy as np
+import pandas as pd
+import rabbitMQ_pb2 as rabbitTypes
 import torch
 import torch.nn as nn
-from collections import OrderedDict
-from sklearn.preprocessing import StandardScaler
-from google.protobuf.struct_pb2 import Struct
+from dynamos.logger import InitLogger
 from dynamos.ms_init import NewConfiguration
 from dynamos.signal_flow import signal_continuation, signal_wait
-from dynamos.logger import InitLogger
-from datetime import datetime
-import time
-import rabbitMQ_pb2 as rabbitTypes
-
 from google.protobuf.empty_pb2 import Empty
-import microserviceCommunication_pb2 as msCommTypes
-import threading
+from google.protobuf.struct_pb2 import Struct
 from opentelemetry.context.context import Context
 
 np.set_printoptions(threshold=sys.maxsize)
 
 # --- DYNAMOS Interface code At the TOP ---------------------------
-if os.getenv('ENV') == 'PROD':
+if os.getenv("ENV") == "PROD":
     import config_prod as config
 else:
     import config_local as config
@@ -45,9 +44,11 @@ ms_config = None
 # --- END DYNAMOS Interface code At the TOP ----------------------
 
 
-def load_data(file_path):
+def load_data(file_path: str) -> pd.DataFrame:
     DATA_STEWARD_NAME = os.getenv("DATA_STEWARD_NAME").lower()
     file_name = f"{file_path}/{DATA_STEWARD_NAME}.csv"
+
+    data = pd.DataFrame()
 
     if DATA_STEWARD_NAME == "":
         logger.error("DATA_STEWARD_NAME not set.")
@@ -58,10 +59,10 @@ def load_data(file_path):
         file_name = f"{file_path}/courseData.csv"
 
     try:
-        data = pd.read_csv(file_name, delimiter=',')
+        data = pd.read_csv(file_name, delimiter=",")
     except FileNotFoundError:
         logger.error(f"CSV file for table {file_name} not found.")
-        return None
+        # return None
 
     return data
 
@@ -75,14 +76,11 @@ class ClientModel(nn.Module):
 
     def forward(self, x):
         x = self.relu(self.fc1(x))
-        return self.fc2(x) 
+        return self.fc2(x)
 
 
 def serialise_array(array):
-    return json.dumps([
-        str(array.dtype),
-        array.tobytes().decode("latin1"),
-        array.shape])
+    return json.dumps([str(array.dtype), array.tobytes().decode("latin1"), array.shape])
 
 
 def deserialise_array(string, hook=None):
@@ -102,39 +100,85 @@ class HFLClient:
     - returns serialized model parameters
     - can load the global model from the server
     """
-    def __init__(self, data, learning_rate=0.001, model_state=None):
-        self.labels = torch.tensor((data["Completed"] == "Completed").astype(int).values).float().unsqueeze(1)
-        self.feature_cols = ['Age', 'Login_Frequency', 'Average_Session_Duration_Min', 'Video_Completion_Rate',
-									'Discussion_Participation', 'Time_Spent_Hours', 'Days_Since_Last_Login',
-									'Notifications_Checked', 'Peer_Interaction_Score', 'Assignments_Submitted',
-									'Assignments_Missed', 'Quiz_Attempts', 'Quiz_Score_Avg', 'Project_Grade',
-									'Progress_Percentage', 'Rewatch_Count', 'Payment_Amount', 'App_Usage_Percentage',
-									'Reminder_Emails_Clicked', 'Support_Tickets_Raised', 'Satisfaction_Rating',
-									'Course_Duration_Days', 'Instructor_Rating'] +  ['Gender_Encoded', 'Education_Encoded', 'Employment_Encoded',
-                                'Device_Encoded', 'Internet_Encoded', 'Level_Encoded',
-                                'Category_Encoded', 'Payment_Encoded']
-        
-        self.data = torch.tensor(data[self.feature_cols].values).float() 
+
+    def __init__(
+        self,
+        data: pd.DataFrame,
+        learning_rate: float = 0.001,
+        partition: float = 1.0,
+        model_state=None,
+    ):
+        """
+        Args:
+            data: DataFrame containing the training data
+            learning_rate: Learning rate for optimizer
+            model_state: Optional pre-trained model state dict
+            partition: Float between 0 and 1 indicating what fraction of data to use (default: 1.0 = all data)
+        """
+        self.labels = (
+            torch.tensor((data["Completed"] == "Completed").astype(int).values)
+            .float()
+            .unsqueeze(1)
+        )
+        self.feature_cols: list[str] = [
+            "Age",
+            "Login_Frequency",
+            "Average_Session_Duration_Min",
+            "Video_Completion_Rate",
+            "Discussion_Participation",
+            "Time_Spent_Hours",
+            "Days_Since_Last_Login",
+            "Notifications_Checked",
+            "Peer_Interaction_Score",
+            "Assignments_Submitted",
+            "Assignments_Missed",
+            "Quiz_Attempts",
+            "Quiz_Score_Avg",
+            "Project_Grade",
+            "Progress_Percentage",
+            "Rewatch_Count",
+            "Payment_Amount",
+            "App_Usage_Percentage",
+            "Reminder_Emails_Clicked",
+            "Support_Tickets_Raised",
+            "Satisfaction_Rating",
+            "Course_Duration_Days",
+            "Instructor_Rating",
+        ] + [
+            "Gender_Encoded",
+            "Education_Encoded",
+            "Employment_Encoded",
+            "Device_Encoded",
+            "Internet_Encoded",
+            "Level_Encoded",
+            "Category_Encoded",
+            "Payment_Encoded",
+        ]
+
+        self.data = torch.tensor(data[self.feature_cols].values).float()
         self.model = ClientModel(self.data.shape[1])
-        
+
         if model_state is not None:
             self.model.load_state_dict(model_state)
 
         # Loss with class balancing
-        pos_weight = torch.tensor([len(self.labels) / sum(self.labels) - 1])  # roughly inverse class ratio
+        pos_weight = torch.tensor(
+            [len(self.labels) / sum(self.labels) - 1]
+        )  # roughly inverse class ratio
         self.criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
 
-
-    def train_local(self, epochs=1, batch_size=32):
+    def train_local(self, epochs: int = 1, batch_size: int = 32):
         """Perform local training."""
         if self.labels is None:
             logger.error("Client has no labels for training.")
             return
-        
+
         self.model.train()
         dataset = torch.utils.data.TensorDataset(self.data, self.labels)
-        loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)
+        loader = torch.utils.data.DataLoader(
+            dataset, batch_size=batch_size, shuffle=True
+        )
 
         for _ in range(epochs):
             for X_batch, y_batch in loader:
@@ -143,7 +187,7 @@ class HFLClient:
                 loss = self.criterion(outputs, y_batch)
                 loss.backward()
                 self.optimizer.step()
-    
+
     def evaluate(self):
         """Evaluate on local data."""
         if self.labels is None:
@@ -152,7 +196,7 @@ class HFLClient:
         with torch.no_grad():
             logits = self.model(self.data)
             preds = torch.sigmoid(logits)
-            predicted = (preds > 0.5)
+            predicted = preds > 0.5
             accuracy = (predicted == self.labels).sum().item() / len(self.labels)
         return accuracy
 
@@ -182,9 +226,9 @@ class HFLClient:
             logger.error(f"Failed to load global model: {e}")
 
 
-def request_handler(msComm: msCommTypes.MicroserviceCommunication,
-                    ctx: Context = None):
+def request_handler(msComm: msCommTypes.MicroserviceCommunication, ctx: Context = None):
     global ms_config
+    global hfl_client
     logger.info(f"Received original request type: {msComm.request_type}")
 
     signal_wait(wait_for_setup_event, wait_for_setup_condition)
@@ -200,7 +244,7 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication,
     DATA_STEWARD_NAME = os.getenv("DATA_STEWARD_NAME").lower()
 
     if DATA_STEWARD_NAME == "server":
-        # Relay server messages 
+        # Relay server messages
         if request.type == "hflShutdownRequest":
             logger.info("Received hflShutdownRequest, shutting down.")
             ms_config.next_client.ms_comm.send_data(msComm, msComm.data, {})
@@ -214,11 +258,21 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication,
             if request.type == "hflTrainRequest":
                 start = time.perf_counter()
                 logger.info(f"{start}: Received hflTrainRequest (client training).")
+
+                # Check if client is initialized
+                if hfl_client is None:
+                    logger.error("Client not initialized.")
+                    return
+
                 try:
-                    epochs = int(request.data.get("epochs").number_value) if "epochs" in request.data else 1
+                    epochs = (
+                        int(request.data.get("epochs").number_value)
+                        if "epochs" in request.data
+                        else 1
+                    )
                 except Exception:
                     epochs = 1
-                
+
                 hfl_client.train_local(epochs=epochs)
                 model_update_json = hfl_client.get_model_update()
                 acc = hfl_client.evaluate()
@@ -239,9 +293,9 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication,
                     global_params_json = request.data["global_params"].string_value
                     global_params = hfl_client.load_global_model(global_params_json)
                     data = Struct()
-                    data.update({"global_params": global_params })
+                    data.update({"global_params": global_params})
                     end = datetime.now()
-                    loading_time = (end- start).total_seconds() * 10**3
+                    loading_time = (end - start).total_seconds() * 10**3
                     logger.info(f"Loading time: {loading_time}ms")
                     data.update({"t_load": loading_time})
                 except Exception as e:
@@ -255,7 +309,46 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication,
 
             elif request.type == "hflPingRequest":
                 logger.info("Received hflPingRequest.")
-                ms_config.next_client.ms_comm.send_data(msComm, msComm.data, {})
+
+                # Initialize the HFL client with the specified partition size
+                # global hfl_client
+
+                # Extract sample_fraction from ping request
+                try:
+                    partition = (
+                        float(request.data.get("partition").number_value)
+                        if "partition" in request.data
+                        else 1.0
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"Error parsing sample_fraction from ping request: {e}. Using default 1.0"
+                    )
+                    partition = 1.0
+
+                if hfl_client is None:
+                    logger.info(
+                        f"Initializing HFL client with partition size={partition}"
+                    )
+                    try:
+                        hfl_client = HFLClient(initial_data, partition=partition)
+                        logger.info(
+                            f"Client initialized successfully with {len(hfl_client.data)} samples"
+                        )
+                    except Exception as e:
+                        logger.error(f"Error initializing HFL client: {e}")
+                        raise
+                else:
+                    logger.info(
+                        f"HFL client already initialized with {len(hfl_client.data)} samples"
+                    )
+
+                # Send response back
+                response_data = Struct()
+                response_data.update(
+                    {"status": "ready", "num_samples": len(hfl_client.data)}
+                )
+                ms_config.next_client.ms_comm.send_data(msComm, response_data, {})
 
             else:
                 logger.error(f"Unknown HFL request type: {request.type}")
@@ -267,17 +360,19 @@ def main():
     global config
     global ms_config
     global hfl_client
+    global initial_data
 
     try:
-        data = load_data(config.dataset_filepath)
-        hfl_client = HFLClient(data)
+        initial_data = load_data(config.dataset_filepath)
+        logger.info(f"Data loaded successfully: {len(initial_data)} samples")
+        # hfl_client = HFLClient(data)
+        # Don't initialize the client until we have the partion size from the training request
+        hfl_client = None
     except Exception as e:
         logger.error(f"Error initializing HFL client: {e}")
         raise
 
-    ms_config = NewConfiguration(
-        config.service_name, config.grpc_addr, request_handler)
-
+    ms_config = NewConfiguration(config.service_name, config.grpc_addr, request_handler)
     signal_continuation(wait_for_setup_event, wait_for_setup_condition)
 
     try:
@@ -289,6 +384,7 @@ def main():
     ms_config.stop(2)
     logger.debug(f"Exiting {config.service_name}")
     sys.exit(0)
+
 
 # ---  END DYNAMOS Interface code At the Bottom -----------------
 

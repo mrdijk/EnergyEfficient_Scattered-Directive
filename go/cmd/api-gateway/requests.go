@@ -447,6 +447,7 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 	var finalAccuracy float64
 	var cycles int64 = 10
 	var learning_rate float64 = 0.05
+	var partition float64 = 1
 	// var change_policies int64 = -1
 	var dataProviders []string = []string{}
 
@@ -465,6 +466,9 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 		if val, ok := data["learning_rate"].(float64); ok {
 			learning_rate = val
 		}
+		if val, ok := data["partition"].(float64); ok {
+			partition = val
+		}
 	}
 
 	trainingFailed := false
@@ -481,6 +485,9 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 
 	logger.Sugar().Info("Sending ping to start pods...")
 	dataRequest["type"] = "hflPingRequest"
+	dataRequest["data"] = map[string]any{
+		"partition": partition,
+	}
 
 	dataRequestJson, err := json.Marshal(dataRequest)
 	if err != nil {
@@ -511,10 +518,11 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 			for i := range 5 {
 				_, err := sendData(endpoint, dataRequestJson)
 
+				// If Ping resquest arrives correctly we don't need to try again
 				if err == nil {
 					break
 				}
-
+				// After 5 tries give up and continue
 				if i == 4 {
 					noPing = true
 					break
@@ -611,10 +619,6 @@ TrainLoop:
 			if err != nil {
 				logger.Sugar().Warnf("error in sending/receiving requestApproval: %v", err)
 				break TrainLoop
-			}
-
-			if err == nil {
-				break
 			}
 
 			if i == 4 {
