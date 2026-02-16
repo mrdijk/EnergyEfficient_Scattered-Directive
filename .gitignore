@@ -40,3 +40,4 @@ datasets/*.csv
 
 
 myenv311
+.zed/settings.json

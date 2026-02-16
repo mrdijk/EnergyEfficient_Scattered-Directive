@@ -34,16 +34,44 @@ Symbol  and Definition
 - ℎ_𝑏𝑎𝑡𝑐ℎ Batch size (ML hyperparameter)
 - ℎ_𝑟𝑎𝑡𝑒 Learning rate (ML hyperparameter)
 
-> For this set of experiments, we assume data is symmetric across all clients (i.e., i.i.d. and e.d. setting) and vary the number of dataset partitions i.e.,total clients 𝑧 = {15, 30, 60, 90, 120, 150, 190, 230, 260, 300, 330, 360, 400}. Therefore the data to model ratio becomes 𝑟_𝑑𝑎𝑡𝑎_𝑖 = 𝑑∕(𝑚 ⋅ 𝑧), ∀𝑖 ∈ [1, 𝑧] (see Section 3.3). We also, for now, assume a constant value for the per round participants 𝑘 = 5.
+> For the first set of experiments, they assume data is symmetric across all clients (i.e., i.i.d. and e.d. setting) and vary the number of dataset partitions i.e.,total clients 𝑧 = {15, 30, 60, 90, 120, 150, 190, 230, 260, 300, 330, 360, 400}. Therefore the data to model ratio becomes 𝑟_𝑑𝑎𝑡𝑎_𝑖 = 𝑑∕(𝑚 ⋅ 𝑧), ∀𝑖 ∈ [1, 𝑧] (see Section 3.3). Also, for the first set of experiments, they assumed a constant value for the per round participants 𝑘 = 5.
 
 > We also explore this data is distributed across clients, *i.e.*, data heterogeneity. We focus on two dimension; variations in size are modeled by the evenly distributed level (e.d.), while variations in content are captured by the indenependent and identically distributed level (i.i.d). Generally, client data can experience various levels of e.d., i.i.d. or combinations of both.
+
+> Image-classification on the Street View House Numbers (SVHN) dataset. This is based on real-world images, with digits taken from house numbers on Google Street View, containing 531,131 32x32 color training images split over 10 classes (digits 0 through 9) totaling 1.3 GB in size and 26,032 test images (63 MB). The linear neural net comprises of an input layer with 3072 neurons corresponding to the 32x32x3 pixels in the input images, an output layer of 10 neurons and a hidden intermediate layer of 512 neurons. A ReLu function is applied to the hidden linear layer and on the output layer a LogSoftMax function. Training loss = negative log-likelihood. Total size of the model is 6.1 MB.
+
+> **Hyperparameter Tuning** epochs tested: {1,5,10,25,50,100,200}, max accuracy achieved with: [25,100]. Increasing epochs causes a linear increase in energy consumption. Batch sizes tested: {64,128,500,1000}, learning rates tested: {0.0001,0.0005,0.001,0.005,0.01,0.05,0.1}. Max (FL) accuracy achieved with batch <=128, rate>=0.05
 
 
 > **On the e.d. level**: describes the size distribution across clients. The size of each client's dataset is modeled as a random variable (F^~) that follows Zipf's law. Represented using a Zeta distribution with density function, px = x^{\sigma_{ed}}/?^{\sigma_{ed}}. ? respresents the Riemann Zeto function, while the Zeto distribution's skewed parameter \sigma_{ed} \in (1,+\inf) shapes the e.d. level, from uniform towards high assymetry.
 
 > **On the i.i.d. level**: If a setting with independent and identically distributed (i.i.d) data is assumed, then the data samples in each client have the same probability distribution and are mutually independent. In our image-classification problem (see Section 3.6) that would essentially mean that each user holds samples from all classes (unbiased setting). That is represented by the i.i.d. level 𝜎𝑖𝑖𝑑 , being equal to the total number of dataset classes. For some real-world scenarios, noni.i.d. (biased) settings could occur, since each participating client might not be expected to possess a representative subset of all classes in the total training dataset. To study different levels of bias, we restrict the number of dataset classes a client can hold i.e., the value of 𝜎𝑖𝑖𝑑 is smaller compared to the total number of classes. 
 
+Kappa_list=[10]
+eed_list=[1.7,2,2.3,1000]
+iid_list=[7,5,3,-1]
+waiting_factor_list=[0]
 
+batch_list =[128]
+local_epoch_list=[25]
+learn_rate_list=[0.1]
+tbegin_list=[0*3600]
+agg_list=[1]
+
+_MODEL = 'SVHN'
+    
+if self._MODEL == 'SVHN':
+            self.central_model = SVHN_Model()
+            if self._IID == -1:
+                self.learning = SVHN_big(self._SUBDATASETS,self._BATCH_SIZE,self._LEARNING_RATE,self._EED)
+            if self._IID == 0:
+                self.learning = SVHN_big(self._SUBDATASETS,self._BATCH_SIZE,self._LEARNING_RATE,self._EED)
+            elif self._IID == 3:
+                self.learning = SVHN_big_noniid(self._SUBDATASETS,self._BATCH_SIZE,self._LEARNING_RATE,splits=3,sd=self._EED)
+            elif self._IID == 5:
+                self.learning = SVHN_big_noniid(self._SUBDATASETS,self._BATCH_SIZE,self._LEARNING_RATE,splits=5,sd=self._EED)
+            elif self._IID == 7:
+                self.learning = SVHN_big_noniid(self._SUBDATASETS,self._BATCH_SIZE,self._LEARNING_RATE,splits=7,sd=self._EED)
 # AutoFL
 
 |   | Description                        | Discrete Values                                        |
