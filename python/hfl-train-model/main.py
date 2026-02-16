@@ -1,29 +1,30 @@
-import pandas as pd
-import numpy as np
-import sys
-import os
 import json
+import os
+import sys
+import tarfile
+import threading
+import time
+from collections import OrderedDict
+
+import microserviceCommunication_pb2 as msCommTypes
+import numpy as np
+import pandas as pd
+import rabbitMQ_pb2 as rabbitTypes
 import torch
 import torch.nn as nn
-import torch.optim as optim
-from google.protobuf.struct_pb2 import Struct
+import torch.nn.functional as F
+from dynamos.logger import InitLogger
 from dynamos.ms_init import NewConfiguration
 from dynamos.signal_flow import signal_continuation, signal_wait
-from dynamos.logger import InitLogger
-from datetime import datetime
-import rabbitMQ_pb2 as rabbitTypes
-
 from google.protobuf.empty_pb2 import Empty
-import microserviceCommunication_pb2 as msCommTypes
-import threading
+from google.protobuf.struct_pb2 import Struct
+from hfl_data import SVHNDataset, get_svhn_transforms
 from opentelemetry.context.context import Context
-from collections import OrderedDict
-import time
 
 np.set_printoptions(threshold=sys.maxsize)
 
 # --- DYNAMOS Interface code At the TOP ---------------------------
-if os.getenv('ENV') == 'PROD':
+if os.getenv("ENV") == "PROD":
     import config_prod as config
 else:
     import config_local as config
@@ -41,7 +42,6 @@ wait_for_setup_event = threading.Event()
 wait_for_setup_condition = threading.Condition()
 
 ms_config = None
-hfl_server = None
 
 # --- END DYNAMOS Interface code At the TOP ----------------------
 
@@ -56,29 +56,24 @@ hfl_server = None
 # --------------------------------
 
 
-def load_data(file_path):
-    DATA_STEWARD_NAME = os.getenv("DATA_STEWARD_NAME").lower()
-    file_name = f"{file_path}/courseData.csv"
+def load_data(file_path: str):
+    """Load SVHN dataset from tar.gz file."""
+    extract_dir = "./svhn_data_extracted"
 
-    if DATA_STEWARD_NAME == "":
-        logger.error("DATA_STEWARD_NAME not set.")
-        file_name = f"{file_path}Data.csv"
+    if not os.path.exists(extract_dir):
+        logger.info(f"Extracting {file_path}...")
+        with tarfile.open(file_path, "r:gz") as tar:
+            tar.extractall(path=extract_dir)
+        logger.info("Extraction complete")
 
-    try:
-        data = pd.read_csv(file_name, delimiter=',')
-        logger.debug("Loaded server dataset successfully.")
-    except FileNotFoundError:
-        logger.error(f"CSV file {file_name} not found.")
-        return None
+    transform = get_svhn_transforms(train=True)
+    dataset = SVHNDataset(extract_dir, transform=transform)
 
-    return data
+    return dataset
 
 
 def serialise_array(array):
-    return json.dumps([
-        str(array.dtype),
-        array.tobytes().decode("latin1"),
-        array.shape])
+    return json.dumps([str(array.dtype), array.tobytes().decode("latin1"), array.shape])
 
 
 def deserialise_array(string, hook=None):
@@ -90,42 +85,63 @@ def deserialise_array(string, hook=None):
         return dataArray.reshape(encoded_data[2])
     return dataArray
 
-class ServerModel(nn.Module):
-    def __init__(self, input_size, device="cpu"):
-        super(ServerModel, self).__init__()
-        self.fc1 = nn.Linear(input_size, 32)
-        self.relu = nn.ReLU()
-        self.fc2 = nn.Linear(32, 1)
 
-    def forward(self, x):
-        x = self.relu(self.fc1(x))
-        return self.fc2(x) 
+class SVHN_Model(nn.Module):
+    def __init__(self):
+        super(SVHN_Model, self).__init__()
+        self.fc3 = nn.Linear(3072, 512)  # 32x32x3
+        self.fc5 = nn.Linear(512, 10)
+        self.size = float(6.1)  # Mb todo
+
+    def forward(self, xb):
+        out = xb.view(-1, 3072)
+        out = self.fc3(out)
+        out = F.relu(out)
+        out = self.fc5(out)
+        return F.log_softmax(out, dim=1)
+
+    def get_size(self):
+        return self.size
+
 
 class HFLServer:
     """
     Horizontal Federated Learning Server:
     - Aggregates all client models
     - Averages all model parameters
-    - Evaluates aggregates model performance 
+    - Evaluates aggregates model performance
     - Sends back the averaged model parameters to the clients
     """
-    def __init__(self, data, learning_rate=0.01):
-        self.labels = torch.tensor((data["Completed"] == "Completed").astype(int).values).float().unsqueeze(1)
-        self.feature_cols = ['Age', 'Login_Frequency', 'Average_Session_Duration_Min', 'Video_Completion_Rate',
-									'Discussion_Participation', 'Time_Spent_Hours', 'Days_Since_Last_Login',
-									'Notifications_Checked', 'Peer_Interaction_Score', 'Assignments_Submitted',
-									'Assignments_Missed', 'Quiz_Attempts', 'Quiz_Score_Avg', 'Project_Grade',
-									'Progress_Percentage', 'Rewatch_Count', 'Payment_Amount', 'App_Usage_Percentage',
-									'Reminder_Emails_Clicked', 'Support_Tickets_Raised', 'Satisfaction_Rating',
-									'Course_Duration_Days', 'Instructor_Rating'] +  ['Gender_Encoded', 'Education_Encoded', 'Employment_Encoded',
-                                'Device_Encoded', 'Internet_Encoded', 'Level_Encoded',
-                                'Category_Encoded', 'Payment_Encoded']
-        
-        self.data = torch.tensor(data[self.feature_cols].values).float() 
-        self.model = ServerModel(self.data.shape[1])
-        # Loss with class balancing
-        pos_weight = torch.tensor([len(self.labels) / sum(self.labels) - 1])  # roughly inverse class ratio
-        self.criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+
+    def __init__(
+        self,
+        # dataset: SVHNDataset,
+        file_path: str,
+        row_ids: list[int] = [],
+        zipf_rank: int = 0,
+        row_count: int = 0,
+        learning_rate: float = 0.1,
+        batch_size: int = 128,
+        model_state=None,
+    ):
+        """
+        Args:
+            file_path: Path to .tar.gz file containing images
+            row_ids: List of specific row indices to use for this partition
+            learning_rate: Learning rate for optimizer
+            model_state: Optional pre-trained model state dict
+        """
+        transform = get_svhn_transforms()
+
+        self.data = SVHNDataset(file_path, transform=transform, row_ids=row_ids)
+        self.rank = zipf_rank
+        self.row_count = row_count
+        self.row_ids = row_ids
+
+        # Initialize model
+        self.model = SVHN_Model()
+
+        self.criterion = nn.CrossEntropyLoss()
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
 
     def aggregate_fit(self, client_updates):
@@ -136,8 +152,10 @@ class HFLServer:
         try:
             total_samples = sum(update["num_samples"] for update in client_updates)
             keys = [k for k, _ in client_updates[0]["params"]]
-            accum = {k: np.zeros_like(client_updates[0]["params"][i][1], dtype=np.float64)
-                        for i, k in enumerate(keys)}
+            accum = {
+                k: np.zeros_like(client_updates[0]["params"][i][1], dtype=np.float64)
+                for i, k in enumerate(keys)
+            }
 
             for update in client_updates:
                 weight = update["num_samples"] / total_samples
@@ -154,29 +172,35 @@ class HFLServer:
             logger.error(f"FedAvg aggregation failed: {e}")
             raise e
 
-        logger.info("FedAvg Succesful, evaluating results")
-
-        # Evaluate accuracy on server dataset
-        self.model.eval()
-        with torch.no_grad():
-            logits = self.model(self.data)
-            loss = self.criterion(logits, self.labels)
-            preds = torch.sigmoid(logits)
-            predicted = (preds > 0.5)
-            accuracy = (predicted == self.labels).sum().item() / len(self.labels)
-
-        data = Struct()
-        data.update({"accuracy": accuracy})
+        logger.info("FedAvg Succesful")
 
         # Serialize averaged model parameters for clients
         np_params = []
         for k, v in self.model.state_dict().items():
-            np_params.append({
-                "key": k,
-                "value": serialise_array(v.detach().cpu().numpy())
-            })
-        data.update({"global_params": json.dumps(np_params)})
-        return data
+            np_params.append(
+                {"key": k, "value": serialise_array(v.detach().cpu().numpy())}
+            )
+        # data.update({"global_params": json.dumps(np_params)})
+        return json.dumps(np_params)
+
+    def evaluate(self):
+        """Evaluate on partitioned data."""
+        self.model.eval()
+        correct = 0
+        total = 0
+
+        loader = torch.utils.data.DataLoader(self.data, batch_size=128, shuffle=False)
+
+        with torch.no_grad():
+            for images, labels in loader:
+                outputs = self.model(images)
+                _, predicted = torch.max(outputs.data, 1)
+                total += labels.size(0)
+                correct += (predicted == labels).sum().item()
+
+        accuracy = correct / total if total > 0 else 0
+        return accuracy
+
 
 def handleAggregateRequest(msComm):
     global ms_config
@@ -192,25 +216,30 @@ def handleAggregateRequest(msComm):
             update_obj = json.loads(update_struct.string_value)
             upd = {
                 "num_samples": update_obj["num_samples"],
-                "params": [(k, deserialise_array(v)) for k, v in update_obj["params"]]
+                "params": [(k, deserialise_array(v)) for k, v in update_obj["params"]],
             }
             client_updates.append(upd)
     except Exception as e:
         logger.error(f"Error deserializing client model updates: {e}")
         return
 
+    data = Struct()
     logger.info("Performing FedAvg aggregation from client updates.")
+
     start = time.perf_counter()
-    time.perf_counter()
     agg_result = hfl_server.aggregate_fit(client_updates)
-    agg_duration =  (time.perf_counter() - start) * 1000
+    agg_duration = (time.perf_counter() - start) * 1000
+    accuracy = hfl_server.evaluate()
+
     logger.info(f"Aggregation duration: {agg_duration:.2f}ms")
-    agg_result.update({"t_agg": agg_duration})
-    ms_config.next_client.ms_comm.send_data(msComm, agg_result, {})
+    data.update({"accuracy": accuracy})
+    data.update({"global_params": agg_result})
+    data.update({"t_agg": agg_duration})
+
+    ms_config.next_client.ms_comm.send_data(msComm, data, {})
 
 
-def request_handler(msComm: msCommTypes.MicroserviceCommunication,
-                    ctx: Context = None):
+def request_handler(msComm: msCommTypes.MicroserviceCommunication, ctx: Context = None):
     global ms_config
 
     logger.info(f"Received original request type: {msComm.request_type}")
@@ -224,7 +253,7 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication,
         ms_config.next_client.ms_comm.send_data(msComm, msComm.data, {})
         return Empty()
 
-    DATA_STEWARD_NAME = os.getenv("DATA_STEWARD_NAME").lower()
+    DATA_STEWARD_NAME = os.getenv("DATA_STEWARD_NAME", "").lower()
 
     if DATA_STEWARD_NAME != "server":
         if request.type == "hflShutdownRequest":
@@ -236,8 +265,7 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication,
             ms_config.next_client.ms_comm.send_data(msComm, msComm.data, {})
     else:
         if request.type == "hflAggregateRequest":
-            timestamp = datetime.now().strftime("%H:%M:%S")
-            logger.info(f"{timestamp}: Received hflAggregateRequest.")
+            logger.info("Received hflAggregateRequest.")
             handleAggregateRequest(msComm)
 
         elif request.type == "hflPingRequest":
@@ -256,11 +284,10 @@ def main():
     global ms_config
     global hfl_server
 
-    data = load_data(config.dataset_filepath)
-    hfl_server = HFLServer(data)
+    # data = load_data(config.dataset_filepath)
+    hfl_server = HFLServer(config.dataset_filepath)
 
-    ms_config = NewConfiguration(
-        config.service_name, config.grpc_addr, request_handler)
+    ms_config = NewConfiguration(config.service_name, config.grpc_addr, request_handler)
 
     # Signal the message handler that all connections have been created
     signal_continuation(wait_for_setup_event, wait_for_setup_condition)
@@ -275,6 +302,7 @@ def main():
     ms_config.stop(2)
     logger.debug(f"Exiting {config.service_name}")
     sys.exit(0)
+
 
 # ---  END DYNAMOS Interface code At the Bottom -----------------
 

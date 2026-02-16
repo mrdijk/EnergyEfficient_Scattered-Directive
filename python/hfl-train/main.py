@@ -1,10 +1,10 @@
 import json
 import os
 import sys
+import tarfile
 import threading
 import time
 from collections import OrderedDict
-from datetime import datetime
 
 import microserviceCommunication_pb2 as msCommTypes
 import numpy as np
@@ -12,11 +12,13 @@ import pandas as pd
 import rabbitMQ_pb2 as rabbitTypes
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from dynamos.logger import InitLogger
 from dynamos.ms_init import NewConfiguration
 from dynamos.signal_flow import signal_continuation, signal_wait
 from google.protobuf.empty_pb2 import Empty
 from google.protobuf.struct_pb2 import Struct
+from hfl_data import SVHNDataset, get_svhn_transforms
 from opentelemetry.context.context import Context
 
 np.set_printoptions(threshold=sys.maxsize)
@@ -44,39 +46,50 @@ ms_config = None
 # --- END DYNAMOS Interface code At the TOP ----------------------
 
 
-def load_data(file_path: str) -> pd.DataFrame:
-    DATA_STEWARD_NAME = os.getenv("DATA_STEWARD_NAME").lower()
-    file_name = f"{file_path}/{DATA_STEWARD_NAME}.csv"
+def load_data(file_path: str):
+    """Load SVHN dataset from tar.gz file."""
+    extract_dir = "./svhn_data_extracted"
 
-    data = pd.DataFrame()
+    if not os.path.exists(extract_dir):
+        logger.info(f"Extracting {file_path}...")
+        with tarfile.open(file_path, "r:gz") as tar:
+            tar.extractall(path=extract_dir)
+        logger.info("Extraction complete")
 
-    if DATA_STEWARD_NAME == "":
-        logger.error("DATA_STEWARD_NAME not set.")
-        file_name = f"{file_path}.csv"
+    transform = get_svhn_transforms(train=True)
+    dataset = SVHNDataset(extract_dir, transform=transform)
 
-    # Load correct dataset for the server
-    if DATA_STEWARD_NAME == "server":
-        file_name = f"{file_path}/courseData.csv"
-
-    try:
-        data = pd.read_csv(file_name, delimiter=",")
-    except FileNotFoundError:
-        logger.error(f"CSV file for table {file_name} not found.")
-        # return None
-
-    return data
+    return dataset
 
 
-class ClientModel(nn.Module):
-    def __init__(self, input_size):
-        super(ClientModel, self).__init__()
-        self.fc1 = nn.Linear(input_size, 32)
-        self.relu = nn.ReLU()
-        self.fc2 = nn.Linear(32, 1)
+# Old model
+# class ClientModel(nn.Module):
+#     def __init__(self, input_size):
+#         super(ClientModel, self).__init__()
+#         self.fc1 = nn.Linear(input_size, 32)
+#         self.relu = nn.ReLU()
+#         self.fc2 = nn.Linear(32, 1)
 
-    def forward(self, x):
-        x = self.relu(self.fc1(x))
-        return self.fc2(x)
+
+#     def forward(self, x):
+#         x = self.relu(self.fc1(x))
+#         return self.fc2(x)
+class SVHN_Model(nn.Module):
+    def __init__(self):
+        super(SVHN_Model, self).__init__()
+        self.fc3 = nn.Linear(3072, 512)  # 32x32x3
+        self.fc5 = nn.Linear(512, 10)
+        self.size = float(6.1)  # Mb todo
+
+    def forward(self, xb):
+        out = xb.view(-1, 3072)
+        out = self.fc3(out)
+        out = F.relu(out)
+        out = self.fc5(out)
+        return F.log_softmax(out, dim=1)
+
+    def get_size(self):
+        return self.size
 
 
 def serialise_array(array):
@@ -96,108 +109,85 @@ def deserialise_array(string, hook=None):
 class HFLClient:
     """
     Horizontal Federated Learning Client:
-    - trains locally on its own data
-    - returns serialized model parameters
-    - can load the global model from the server
+    - Trains locally on its own data
+    - Returns serialized model parameters
+    - Loads the global model from the server
     """
 
     def __init__(
         self,
-        data: pd.DataFrame,
-        learning_rate: float = 0.001,
-        partition: float = 1.0,
+        file_path: str,
+        row_ids: list[int] = [],
+        zipf_rank: int = 0,
+        row_count: int = 0,
+        learning_rate: float = 0.1,
+        batch_size: int = 128,
         model_state=None,
     ):
         """
         Args:
-            data: DataFrame containing the training data
-            learning_rate: Learning rate for optimizer
+            file_path: Path to .tar.gz file containing images
+            row_ids: List of specific row indices to use for this partition
+            zipf_rank: Rank of the partition (1 to N, N being the number of total partitions)
+            row_count: Number of rows in partition
+            learning_rate: Learning rate for optimizer based on Drainakis et al.
+            batch_size: batch size for training based on Drainakis et al.
             model_state: Optional pre-trained model state dict
-            partition: Float between 0 and 1 indicating what fraction of data to use (default: 1.0 = all data)
         """
-        self.labels = (
-            torch.tensor((data["Completed"] == "Completed").astype(int).values)
-            .float()
-            .unsqueeze(1)
-        )
-        self.feature_cols: list[str] = [
-            "Age",
-            "Login_Frequency",
-            "Average_Session_Duration_Min",
-            "Video_Completion_Rate",
-            "Discussion_Participation",
-            "Time_Spent_Hours",
-            "Days_Since_Last_Login",
-            "Notifications_Checked",
-            "Peer_Interaction_Score",
-            "Assignments_Submitted",
-            "Assignments_Missed",
-            "Quiz_Attempts",
-            "Quiz_Score_Avg",
-            "Project_Grade",
-            "Progress_Percentage",
-            "Rewatch_Count",
-            "Payment_Amount",
-            "App_Usage_Percentage",
-            "Reminder_Emails_Clicked",
-            "Support_Tickets_Raised",
-            "Satisfaction_Rating",
-            "Course_Duration_Days",
-            "Instructor_Rating",
-        ] + [
-            "Gender_Encoded",
-            "Education_Encoded",
-            "Employment_Encoded",
-            "Device_Encoded",
-            "Internet_Encoded",
-            "Level_Encoded",
-            "Category_Encoded",
-            "Payment_Encoded",
-        ]
+        transform = get_svhn_transforms()
 
-        self.data = torch.tensor(data[self.feature_cols].values).float()
-        self.model = ClientModel(self.data.shape[1])
+        self.data = SVHNDataset(file_path, transform=transform, row_ids=row_ids)
+        self.rank = zipf_rank
+        self.row_count = row_count
+        self.row_ids = row_ids
+
+        # Initialize model
+        self.model = SVHN_Model()
 
         if model_state is not None:
             self.model.load_state_dict(model_state)
 
-        # Loss with class balancing
-        pos_weight = torch.tensor(
-            [len(self.labels) / sum(self.labels) - 1]
-        )  # roughly inverse class ratio
-        self.criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+        self.criterion = nn.CrossEntropyLoss()
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
 
-    def train_local(self, epochs: int = 1, batch_size: int = 32):
-        """Perform local training."""
-        if self.labels is None:
-            logger.error("Client has no labels for training.")
-            return
-
+    def train_local(self, epochs: int = 25, batch_size: int = 128):
+        """Perform local training on partitioned data."""
         self.model.train()
-        dataset = torch.utils.data.TensorDataset(self.data, self.labels)
+
         loader = torch.utils.data.DataLoader(
-            dataset, batch_size=batch_size, shuffle=True
+            self.data, batch_size=batch_size, shuffle=True
         )
 
-        for _ in range(epochs):
-            for X_batch, y_batch in loader:
+        for epoch in range(epochs):
+            total_loss = 0
+            for images, labels in loader:
                 self.optimizer.zero_grad()
-                outputs = self.model(X_batch)
-                loss = self.criterion(outputs, y_batch)
+                outputs = self.model(images)
+                loss = self.criterion(outputs, labels)
                 loss.backward()
                 self.optimizer.step()
+                total_loss += loss.item()
+
+            logger.debug(
+                f"Epoch {epoch + 1}/{epochs}, Loss: {total_loss / len(loader):.4f}"
+            )
 
     def evaluate(self):
-        """Evaluate on local data."""
-        if self.labels is None:
-            return None
+        """Evaluate on partitioned data."""
         self.model.eval()
+        correct = 0
+        total = 0
+
+        loader = torch.utils.data.DataLoader(self.data, batch_size=128, shuffle=False)
+
         with torch.no_grad():
-            logits = self.model(self.data)
-            preds = torch.sigmoid(logits)
-            predicted = preds > 0.5
-            accuracy = (predicted == self.labels).sum().item() / len(self.labels)
+            for images, labels in loader:
+                outputs = self.model(images)
+                _, predicted = torch.max(outputs.data, 1)
+                total += labels.size(0)
+                correct += (predicted == labels).sum().item()
+
+        accuracy = correct / total if total > 0 else 0
         return accuracy
 
     def get_model_update(self):
@@ -241,7 +231,7 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication, ctx: Context 
         ms_config.next_client.ms_comm.send_data(msComm, msComm.data, {})
         return Empty()
 
-    DATA_STEWARD_NAME = os.getenv("DATA_STEWARD_NAME").lower()
+    DATA_STEWARD_NAME = os.getenv("DATA_STEWARD_NAME", "").lower()
 
     if DATA_STEWARD_NAME == "server":
         # Relay server messages
@@ -262,16 +252,10 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication, ctx: Context 
                 # Check if client is initialized
                 if hfl_client is None:
                     logger.error("Client not initialized.")
-                    return
+                    return Empty()
 
-                try:
-                    epochs = (
-                        int(request.data.get("epochs").number_value)
-                        if "epochs" in request.data
-                        else 1
-                    )
-                except Exception:
-                    epochs = 1
+                # Drainakis et al. use 25 epochs
+                epochs = int(request.data.get("epochs", 25).number_value)
 
                 hfl_client.train_local(epochs=epochs)
                 model_update_json = hfl_client.get_model_update()
@@ -284,18 +268,18 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication, ctx: Context 
                 training_time = (time.perf_counter() - start) * 1000
                 logger.info(f"Training time: {training_time:.2f}ms")
                 data.update({"t_train": training_time})
+
                 ms_config.next_client.ms_comm.send_data(msComm, data, {})
 
             elif request.type == "hflLoadGlobalModel":
-                start = datetime.now()
+                start = time.perf_counter()
                 logger.info("Received hflLoadGlobalModel (update local model).")
                 try:
                     global_params_json = request.data["global_params"].string_value
                     global_params = hfl_client.load_global_model(global_params_json)
                     data = Struct()
                     data.update({"global_params": global_params})
-                    end = datetime.now()
-                    loading_time = (end - start).total_seconds() * 10**3
+                    loading_time = (time.perf_counter() - start) * 1000
                     logger.info(f"Loading time: {loading_time}ms")
                     data.update({"t_load": loading_time})
                 except Exception as e:
@@ -310,44 +294,40 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication, ctx: Context 
             elif request.type == "hflPingRequest":
                 logger.info("Received hflPingRequest.")
 
-                # Initialize the HFL client with the specified partition size
-                # global hfl_client
+                # Initialize the HFL client with specified partition configuration
+                learning_rate = float(request.data.get("epochs", 0.1).number_value)
+                partition_config = request.data.get("partition", {})
+                zipf_rank = int(partition_config.get("rank", 0).number_value)
+                row_count = int(partition_config.get("row_count", 0).number_value)
+                row_ids = partition_config.get("row_ids", {}).number_value
 
-                # Extract sample_fraction from ping request
-                try:
-                    partition = (
-                        float(request.data.get("partition").number_value)
-                        if "partition" in request.data
-                        else 1.0
-                    )
-                except Exception as e:
-                    logger.warning(
-                        f"Error parsing sample_fraction from ping request: {e}. Using default 1.0"
-                    )
-                    partition = 1.0
+                logger.info(f"Received partition {zipf_rank} with {row_count} rows")
 
                 if hfl_client is None:
-                    logger.info(
-                        f"Initializing HFL client with partition size={partition}"
-                    )
                     try:
-                        hfl_client = HFLClient(initial_data, partition=partition)
                         logger.info(
-                            f"Client initialized successfully with {len(hfl_client.data)} samples"
+                            f"Initializing HFL client with partition {zipf_rank}"
+                        )
+                        # Initialize or reinitialize client with partition
+                        hfl_client = HFLClient(
+                            file_path=config.dataset_filepath,
+                            row_count=row_count,
+                            zipf_rank=zipf_rank,
+                            row_ids=row_ids,
+                            learning_rate=learning_rate,
+                        )
+                        logger.info(
+                            f"Client initialized successfully with {hfl_client.row_count} samples"
                         )
                     except Exception as e:
                         logger.error(f"Error initializing HFL client: {e}")
                         raise
                 else:
-                    logger.info(
-                        f"HFL client already initialized with {len(hfl_client.data)} samples"
-                    )
+                    logger.info("HFL client already initialized")
 
                 # Send response back
                 response_data = Struct()
-                response_data.update(
-                    {"status": "ready", "num_samples": len(hfl_client.data)}
-                )
+                response_data.update({"status": "ready", "rank": hfl_client.rank})
                 ms_config.next_client.ms_comm.send_data(msComm, response_data, {})
 
             else:
@@ -362,15 +342,7 @@ def main():
     global hfl_client
     global initial_data
 
-    try:
-        initial_data = load_data(config.dataset_filepath)
-        logger.info(f"Data loaded successfully: {len(initial_data)} samples")
-        # hfl_client = HFLClient(data)
-        # Don't initialize the client until we have the partion size from the training request
-        hfl_client = None
-    except Exception as e:
-        logger.error(f"Error initializing HFL client: {e}")
-        raise
+    hfl_client = None
 
     ms_config = NewConfiguration(config.service_name, config.grpc_addr, request_handler)
     signal_continuation(wait_for_setup_event, wait_for_setup_condition)

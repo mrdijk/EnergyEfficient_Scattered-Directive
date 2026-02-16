@@ -1,33 +1,26 @@
-# ---- Base python ----
-# FROM python:3.9-slim-buster AS base
-FROM  python:3.12-slim
+FROM mdijk/hfl-base:latest
 
 ARG NAME
 ARG WHEEL_NAME
 ENV NAME=$NAME
 
 WORKDIR /app
-RUN mkdir $NAME
-RUN mkdir datasets
-RUN mkdir protofiles
+RUN mkdir -p $NAME datasets protofiles
 
-COPY requirements.txt .
-COPY *_requirements.txt .
-COPY ./*.py /app/$NAME
-COPY ./protofiles/*.py /app/protofiles
-
-COPY ./dataset[s]/ /app/datasets
+# Install dynamos wheel FIRST
 COPY $WHEEL_NAME /tmp/
+RUN pip install /tmp/$WHEEL_NAME && rm /tmp/$WHEEL_NAME
 
-RUN pip install /tmp/$WHEEL_NAME
-RUN pip install --no-cache-dir -r requirements.txt
-RUN pip install --upgrade numpy pandas
+# Install other requirements
+COPY requirements.txt .
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --no-cache-dir -r requirements.txt
 
-RUN if [ -f "torch_requirements.txt" ]; then \
-  pip install -r torch_requirements.txt; \
-fi
+COPY hfl-data/svhn_dataset.py /app/$NAME/
 
-ENV  ENV="PROD"
+COPY ./*.py /app/$NAME/
+COPY ./protofiles/*.py /app/protofiles/
+
+ENV ENV="PROD"
 ENV PYTHONPATH="/app/protofiles"
-
 CMD ["sh", "-c", "python /app/${NAME}/main.py"]
