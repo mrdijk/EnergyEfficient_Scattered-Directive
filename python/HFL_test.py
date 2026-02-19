@@ -365,3 +365,10 @@ for rnd in range(TOTAL_ROUNDS):
             # "num_clients": NOF_CLIENTS
         }
     )
+
+Z_list = [400, 360, 330, 300, 260, 230, 190, 150, 120, 90, 60, 30, 15]
+Kappa_list = [5, 10, 20]
+# eed_list = [1.7, 2, 2.3, 1000]
+# iid_list = [7, 5, 3, -1]
+
+print(len(Z_list) * len(Kappa_list) * len(eed_list) * len(iid_list))

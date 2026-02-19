@@ -1,3 +1,5 @@
+import base64
+import gzip
 import json
 import os
 import sys
@@ -17,6 +19,7 @@ from dynamos.logger import InitLogger
 from dynamos.ms_init import NewConfiguration
 from dynamos.signal_flow import signal_continuation, signal_wait
 from google.protobuf.empty_pb2 import Empty
+from google.protobuf.json_format import MessageToDict
 from google.protobuf.struct_pb2 import Struct
 from hfl_data import SVHNDataset, get_svhn_transforms
 from opentelemetry.context.context import Context
@@ -62,18 +65,6 @@ def load_data(file_path: str):
     return dataset
 
 
-# Old model
-# class ClientModel(nn.Module):
-#     def __init__(self, input_size):
-#         super(ClientModel, self).__init__()
-#         self.fc1 = nn.Linear(input_size, 32)
-#         self.relu = nn.ReLU()
-#         self.fc2 = nn.Linear(32, 1)
-
-
-#     def forward(self, x):
-#         x = self.relu(self.fc1(x))
-#         return self.fc2(x)
 class SVHN_Model(nn.Module):
     def __init__(self):
         super(SVHN_Model, self).__init__()
@@ -92,15 +83,38 @@ class SVHN_Model(nn.Module):
         return self.size
 
 
+# def serialise_array(array):
+#     return json.dumps([str(array.dtype), array.tobytes().decode("latin1"), array.shape])
+
+
+# def deserialise_array(string, hook=None):
+#     encoded_data = json.loads(string, object_pairs_hook=hook)
+#     dataType = np.dtype(encoded_data[0])
+#     dataArray = np.frombuffer(encoded_data[1].encode("latin1"), dataType)
+
+
+#     if len(encoded_data) > 2:
+#         return dataArray.reshape(encoded_data[2])
+#     return dataArray
+#
 def serialise_array(array):
-    return json.dumps([str(array.dtype), array.tobytes().decode("latin1"), array.shape])
+    """Serialize numpy array more efficiently using base64."""
+    return json.dumps(
+        [
+            str(array.dtype),
+            base64.b64encode(array.tobytes()).decode("ascii"),
+            array.shape,
+        ]
+    )
 
 
 def deserialise_array(string, hook=None):
+    """Deserialize numpy array from base64."""
     encoded_data = json.loads(string, object_pairs_hook=hook)
     dataType = np.dtype(encoded_data[0])
-    dataArray = np.frombuffer(encoded_data[1].encode("latin1"), dataType)
-
+    dataArray = np.frombuffer(
+        base64.b64decode(encoded_data[1].encode("ascii")), dataType
+    )
     if len(encoded_data) > 2:
         return dataArray.reshape(encoded_data[2])
     return dataArray
@@ -197,7 +211,7 @@ class HFLClient:
         for k, v in state_dict.items():
             nd = v.detach().cpu().numpy()
             params.append([k, serialise_array(nd)])
-        update = {"num_samples": len(self.data), "params": params}
+        update = {"num_samples": self.row_count, "params": params}
         return json.dumps(update)
 
     def load_global_model(self, global_params_json):
@@ -254,10 +268,10 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication, ctx: Context 
                     logger.error("Client not initialized.")
                     return Empty()
 
-                # Drainakis et al. use 25 epochs
-                epochs = int(request.data.get("epochs", 25).number_value)
+                batch_size = int(request.data.get("batch_size", 128))
+                epochs = int(request.data.get("epochs", 1))
 
-                hfl_client.train_local(epochs=epochs)
+                hfl_client.train_local(epochs=epochs, batch_size=batch_size)
                 model_update_json = hfl_client.get_model_update()
                 acc = hfl_client.evaluate()
                 logger.info(f"Local model accuracy is {acc}")
@@ -294,13 +308,18 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication, ctx: Context 
             elif request.type == "hflPingRequest":
                 logger.info("Received hflPingRequest.")
 
-                # Initialize the HFL client with specified partition configuration
-                learning_rate = float(request.data.get("epochs", 0.1).number_value)
+                logger.info(f"request: {request.data}")
                 partition_config = request.data.get("partition", {})
-                zipf_rank = int(partition_config.get("rank", 0).number_value)
-                row_count = int(partition_config.get("row_count", 0).number_value)
-                row_ids = partition_config.get("row_ids", {}).number_value
+                learning_rate = request.data.get("learning_rate", 0.1)
 
+                partition_dict = MessageToDict(partition_config.struct_value)
+
+                # Access partition fields
+                # row_ids = partition_dict.get("row_ids", {})
+                zipf_rank = int(partition_dict.get("zipf_rank", 0))
+                row_count = int(partition_dict.get("row_count", 0))
+                row_ids = [int(r) for r in partition_dict.get("row_ids", [])]
+                logger.info(f"row_ids: {row_ids}")
                 logger.info(f"Received partition {zipf_rank} with {row_count} rows")
 
                 if hfl_client is None:
@@ -326,9 +345,9 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication, ctx: Context 
                     logger.info("HFL client already initialized")
 
                 # Send response back
-                response_data = Struct()
-                response_data.update({"status": "ready", "rank": hfl_client.rank})
-                ms_config.next_client.ms_comm.send_data(msComm, response_data, {})
+                # response_data = Struct()
+                # response_data.update({"status": "ready", "rank": hfl_client.rank})
+                ms_config.next_client.ms_comm.send_data(msComm, msComm.data, {})
 
             else:
                 logger.error(f"Unknown HFL request type: {request.type}")

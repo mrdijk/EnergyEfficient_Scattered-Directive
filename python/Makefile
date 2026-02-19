@@ -23,24 +23,32 @@ dynamos:
 	(cd ./dynamos-python-lib && python3 setup.py bdist_wheel)
 
 # Set PYTHONPATH to protofiles directory for includes to GRPC code to work
+# Build individual services
 $(targets): proto
 	cp Dockerfile ./$@
-
 	# Build the wheel for the local package
 	(cd ./dynamos-python-lib && python3 setup.py bdist_wheel)
-
 	# Copy the wheel to the target directory
 	cp ./dynamos-python-lib/dist/*.whl ./$@
+	# Copy protofiles
 	cp -r ./dynamos-python-lib/protofiles ./$@
-	cp -r ./hfl-data ./$@
+
+	mkdir -p ./$@/hfl-data
+	cp ./hfl-data/*.py ./$@/hfl-data/
 
 	# Build Docker container
-	@trap 'rm -f ./$@/Dockerfile; rm -rf ./$@/*.whl; rm -rf ./$@/protofiles' EXIT;  \
+	@trap 'rm -f ./$@/Dockerfile; rm -rf ./$@/*.whl; rm -rf ./$@/protofiles; rm -rf ./$@/hfl-data' EXIT; \
 	WHEEL_NAME=$$(ls ./$@/*.whl); \
 	BASE=$$(basename $$WHEEL_NAME); \
-	DOCKER_BUILDKIT=1 docker build --platform linux/amd64 --build-arg NAME=$@ -t $(dockerhub_account)/$@:$(branch_name) --build-arg WHEEL_NAME=$$BASE -t $(dockerhub_account)/$@:latest ./$@/
+	DOCKER_BUILDKIT=1 docker build \
+		--platform linux/amd64 \
+		--build-arg NAME=$@ \
+		--build-arg WHEEL_NAME=$$BASE \
+		-t $(dockerhub_account)/$@:$(branch_name) \
+		-t $(dockerhub_account)/$@:latest \
+		./$@/
 
-	# Push to Docker
 	docker push $(dockerhub_account)/$@:$(branch_name)
 	docker push $(dockerhub_account)/$@:latest
+
 all: all $(targets) $(proto)

@@ -6,6 +6,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"net"
 	"net/http"
 	"os"
@@ -34,11 +35,18 @@ var (
 	trainingRequests = sync.Map{} // map[string]TrainingRequestData
 )
 
-type TrainingRequestData struct {
+type TrainingData struct {
 	Status string
 	Data   *ExperimentData
 	// Metadata map[string]any
 	// add more fields as needed
+}
+
+type TrainingRequestData struct {
+	LearningRate float64   `json:"learning_rate"`
+	Epochs       int       `json:"epochs"`
+	BatchSize    int       `json:"batch_size"`
+	Partition    Partition `json:"partition"`
 }
 
 func getTrainingStatusHandler() http.HandlerFunc {
@@ -52,7 +60,7 @@ func getTrainingStatusHandler() http.HandlerFunc {
 		}
 
 		logger.Sugar().Debug("Found training request: ", requestID)
-		reqData := v.(TrainingRequestData)
+		reqData := v.(TrainingData)
 		resp := map[string]any{
 			"request_id": requestID,
 			"status":     reqData.Status,
@@ -83,6 +91,21 @@ type ExperimentData struct {
 	EndTime   string         `json:"end_time"`
 	Rounds    []RoundMetrics `json:"rounds"`
 	mu        sync.Mutex     `json:"-"`
+}
+
+func selectRandomPartitions(partitions []Partition, numClients int) []Partition {
+	if len(partitions) <= numClients {
+		return partitions
+	}
+
+	selected := make([]Partition, len(partitions))
+	copy(selected, partitions)
+
+	rand.Shuffle(len(selected), func(i, j int) {
+		selected[i], selected[j] = selected[j], selected[i]
+	})
+
+	return selected[:numClients]
 }
 
 func (er *ExperimentData) SaveToCSV(filename string) error {
@@ -126,7 +149,7 @@ func requestHandler() http.HandlerFunc {
 		// Check for existing active job
 		if activeJobID != "" {
 			v, _ := trainingRequests.Load(activeJobID)
-			reqData := v.(TrainingRequestData)
+			reqData := v.(TrainingData)
 			resp := map[string]any{
 				"error":             "A training job is already in progress.",
 				"active_request_id": activeJobID,
@@ -141,7 +164,7 @@ func requestHandler() http.HandlerFunc {
 		// Accept new job
 		requestID := uuid.New().String()
 		activeJobID = requestID
-		reqData := TrainingRequestData{
+		reqData := TrainingData{
 			Status: StatusPending,
 			Data: &ExperimentData{
 				// JobID:  requestID,
@@ -446,10 +469,16 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 	var serverAuth string
 	var finalAccuracy float64
 	var cycles int64 = 10
-	var learning_rate float64 = 0.05
-	var partition float64 = 1
+	var learningRate float64 = 0.05
 	// var change_policies int64 = -1
 	var dataProviders []string = []string{}
+
+	// Zipf Partition Configuration
+	var nrPartitions int = 20
+	var totalRows int = 531130
+	// 0: uniform
+	var zipfExponent float64 = 0
+	var seed int64 = time.Now().UnixNano()
 
 	var wg sync.WaitGroup
 	results := &ExperimentData{
@@ -464,15 +493,23 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 			cycles = int64(val)
 		}
 		if val, ok := data["learning_rate"].(float64); ok {
-			learning_rate = val
+			learningRate = val
 		}
-		if val, ok := data["partition"].(float64); ok {
-			partition = val
+		if val, ok := data["partitions"].(int); ok {
+			nrPartitions = val
+		}
+		if val, ok := data["zipf"].(float64); ok {
+			zipfExponent = val
 		}
 	}
 
+	partitionConfig := makePartitionConfiguration(nrPartitions, totalRows, zipfExponent, seed)
 	trainingFailed := false
 
+	// Check first partition
+	fmt.Printf("Partition 1: RowCount=%d, len(RowIDs)=%d\n",
+		partitionConfig.Partitions[0].RowCount,
+		len(partitionConfig.Partitions[0].RowIDs))
 	for auth, url := range authorizedProviders {
 		if strings.ToLower(auth) == "server" {
 			serverUrl = url
@@ -483,62 +520,102 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 		dataProviders = append(dataProviders, auth)
 	}
 
+	// Select partitions for clients
+	numClients := len(clients)
+	selectedPartitions := selectRandomPartitions(partitionConfig.Partitions, numClients)
+
+	logger.Sugar().Infof("Selected %d partitions for %d clients", len(selectedPartitions), numClients)
 	logger.Sugar().Info("Sending ping to start pods...")
-	dataRequest["type"] = "hflPingRequest"
-	dataRequest["data"] = map[string]any{
-		"partition": partition,
+
+	// The server has a test set with 26033 samples
+	serverRowIDs := make([]int, 26033)
+	for i := range serverRowIDs {
+		serverRowIDs[i] = i
 	}
 
-	dataRequestJson, err := json.Marshal(dataRequest)
-	if err != nil {
-		logger.Sugar().Errorf("Error marshalling ping request: %v", err)
-		return []byte{}
+	serverPartition := Partition{
+		Rank:        1,
+		RowCount:    26032,
+		Probability: 1,
+		Percentage:  1,
+		RowIDs:      serverRowIDs,
+	}
+
+	// Map clients to partitions
+	clientPartitionMap := make(map[string]Partition)
+	clientIdx := 0
+	for auth := range clients {
+		if clientIdx < len(selectedPartitions) {
+			clientPartitionMap[auth] = selectedPartitions[clientIdx]
+			clientIdx++
+		}
 	}
 
 	user, ok := dataRequest["user"].(*pb.User)
-
 	if !ok {
 		logger.Sugar().Error("Did not retrieve User from dataRequest, cannot dynamically verify each training round.")
 		user = &pb.User{}
 	}
 
 	var noPing bool = false
-	var noPingAuth []string
 
-	// logger.Sugar().Info("providers: ", authorizedProviders)
-
+	// Send pring to each client with their assigned partition
 	for auth, url := range authorizedProviders {
 		wg.Add(1)
 
 		target := strings.ToLower(auth)
 		endpoint := fmt.Sprintf("http://%s:8080/agent/v1/hflTrainRequest/%s", url, target)
 
-		go func(auth string, endpoint string) {
-			logger.Sugar().Infof("Sending Ping to %s", auth)
+		// Get this clients partition
+		partition, hasPartition := clientPartitionMap[auth]
+
+		if target == "server" {
+			partition, hasPartition = serverPartition, true
+		}
+
+		go func(auth string, endpoint string, partition Partition, hasPartition bool) {
+			defer wg.Done()
+			if !hasPartition {
+				logger.Sugar().Warnf("No partition assigned to client %s", auth)
+				// return
+			}
+			logger.Sugar().Infof("Sending Ping to %s with partition %d (%d rows)", auth, partition.Rank, partition.RowCount)
+
+			// Create request with single partition for this client
+			dataRequest["type"] = "hflPingRequest"
+			dataRequest["data"] = map[string]any{
+				"partition": partition, // Single partition, not array
+			}
+
+			dataRequestJson, err := json.Marshal(dataRequest)
+			if err != nil {
+				logger.Sugar().Errorf("Error marshalling ping request for %s: %v", auth, err)
+				return
+			}
+
 			for i := range 5 {
 				_, err := sendData(endpoint, dataRequestJson)
 
 				// If Ping resquest arrives correctly we don't need to try again
 				if err == nil {
+					logger.Sugar().Infof("Successfully pinged %s with partition %d", auth, partition.Rank)
 					break
 				}
 				// After 5 tries give up and continue
 				if i == 4 {
 					noPing = true
+					logger.Sugar().Errorf("Failed to ping %s after 5 attempts", auth)
 					break
-					// noPingAuth = append(noPingAuth, auth)
 				}
 			}
-
-			wg.Done()
-		}(auth, endpoint)
+		}(auth, endpoint, partition, hasPartition)
 	}
 
 	wg.Wait()
 
 	// If a client doesn't start, stop training and set status to "Failed" and shutdown all clients
 	if noPing {
-		logger.Sugar().Errorf("No ping from %s.", noPingAuth)
+		logger.Sugar().Error("No ping from one or more clients")
 		v, ok := trainingRequests.Load(requestID)
 
 		if !ok {
@@ -546,7 +623,7 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 			return []byte{}
 		}
 
-		reqData := v.(TrainingRequestData)
+		reqData := v.(TrainingData)
 		reqData.Status = StatusFailed
 		trainingRequests.Store(requestID, reqData)
 
@@ -562,7 +639,7 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 		activeJobLock.Unlock()
 
 		dataRequest["type"] = "hflShutdownRequest"
-		dataRequestJson, err = json.Marshal(dataRequest)
+		dataRequestJson, err := json.Marshal(dataRequest)
 		if err != nil {
 			logger.Sugar().Errorf("Error marshalling shutdown request: %v", err)
 			return []byte{}
@@ -615,11 +692,12 @@ TrainLoop:
 
 		logger.Sugar().Info("- Sending policy reverification request")
 		for i := range 5 {
-			_, err = c.SendRequestApproval(ctx, protoRequest)
-			if err != nil {
-				logger.Sugar().Warnf("error in sending/receiving requestApproval: %v", err)
-				break TrainLoop
+			_, err := c.SendRequestApproval(ctx, protoRequest)
+			if err == nil {
+				break
 			}
+
+			logger.Sugar().Warnf("error in sending/receiving requestApproval: %v", err)
 
 			if i == 4 {
 				noValidation = true
@@ -649,7 +727,7 @@ TrainLoop:
 
 		logger.Sugar().Info("Sending training requests")
 		// accuracy, training_duration, err := runHFLTrainingRound(dataRequest, clients, serverAuth, serverUrl, learning_rate)
-		RoundMetrics, err := runHFLTrainingRound(dataRequest, clients, serverAuth, serverUrl, learning_rate)
+		RoundMetrics, err := runHFLTrainingRound(dataRequest, clients, serverAuth, serverUrl, learningRate)
 		if err != nil {
 			logger.Sugar().Errorf("Round %d failed: %v", round, err)
 			trainingFailed = true
@@ -687,7 +765,7 @@ TrainLoop:
 		return []byte{}
 	}
 
-	reqData := v.(TrainingRequestData)
+	reqData := v.(TrainingData)
 	reqData.Data = results
 	if trainingFailed {
 		reqData.Status = StatusFailed
@@ -717,7 +795,7 @@ TrainLoop:
 	logger.Sugar().Infof("Training results: ", string(responseJson))
 
 	dataRequest["type"] = "hflShutdownRequest"
-	dataRequestJson, err = json.Marshal(dataRequest)
+	dataRequestJson, err := json.Marshal(dataRequest)
 	if err != nil {
 		logger.Sugar().Errorf("Error marshalling shutdown request: %v", err)
 		return []byte{}

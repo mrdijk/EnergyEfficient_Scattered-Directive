@@ -13,21 +13,24 @@ Notes:
 Author: Jorrit Stutterheim
 """
 
-import grpc
-from .base_client import BaseClient
-from concurrent import futures
 import threading
-from opentelemetry import trace
-from google.protobuf.empty_pb2 import Empty
+from concurrent import futures
 from typing import Callable, Dict
 
-import health_pb2_grpc as healthServer
+import grpc
 import health_pb2 as healthTypes
-import microserviceCommunication_pb2_grpc as msCommServer
+import health_pb2_grpc as healthServer
 import microserviceCommunication_pb2 as msCommTypes
+import microserviceCommunication_pb2_grpc as msCommServer
+from google.protobuf.empty_pb2 import Empty
+from opentelemetry import trace
 
+from .base_client import BaseClient
 
-CallbackType = Callable[[grpc.ServicerContext, msCommTypes.MicroserviceCommunication], Empty]
+CallbackType = Callable[
+    [grpc.ServicerContext, msCommTypes.MicroserviceCommunication], Empty
+]
+
 
 class HealthServicer(healthServer.HealthServicer):
     """
@@ -85,21 +88,28 @@ class MicroserviceServicer(msCommServer.MicroserviceServicer):
         msCommHandler: The callback function to be called when a message is received.
     """
 
-    def __init__(self, msCommHandler: Callable[[msCommTypes.MicroserviceCommunication], Empty()], logger): # type: ignore
+    def __init__(
+        self,
+        msCommHandler: Callable[[msCommTypes.MicroserviceCommunication], Empty()],
+        logger,
+    ):  # type: ignore
         self.callback: CallbackType = msCommHandler
         self.logger = logger
-
 
     def SendData(self, msComm: msCommTypes.MicroserviceCommunication, context):
         """
         Send the data to the next microservice in the chain.
         """
-        self.logger.debug(f"Starting MicroserviceServicer grpc_server.py/SendData: {msComm.request_metadata.destination_queue}")
+        self.logger.debug(
+            f"Starting MicroserviceServicer grpc_server.py/SendData: {msComm.request_metadata.destination_queue}"
+        )
 
         span = trace.get_current_span()
         try:
             # Start a new span
-            with trace.get_tracer(__name__).start_as_current_span("grpc_server.py/SendData") as span:
+            with trace.get_tracer(__name__).start_as_current_span(
+                "grpc_server.py/SendData"
+            ) as span:
                 pass
         except Exception as err:
             self.logger.warn(f"Error starting span: {err}")
@@ -108,7 +118,9 @@ class MicroserviceServicer(msCommServer.MicroserviceServicer):
         try:
             self.logger.debug(f"msComm type: {type(msComm)}")
             if not isinstance(msComm, msCommTypes.MicroserviceCommunication):
-                raise TypeError(f"Expected msComm to be of type msCommTypes.MicroserviceCommunication, got {type(msComm)}")
+                raise TypeError(
+                    f"Expected msComm to be of type msCommTypes.MicroserviceCommunication, got {type(msComm)}"
+                )
 
             self.callback(msComm)
         except TypeError as e:
@@ -117,7 +129,6 @@ class MicroserviceServicer(msCommServer.MicroserviceServicer):
         except Exception as err:
             self.logger.error(f"SendData Error: {err}")
             return Empty()
-
 
         return Empty()
 
@@ -140,14 +151,36 @@ class GRPCServer(BaseClient):
 
     """
 
-    def __init__(self, grpc_addr, msCommHandler: Callable[[msCommTypes.MicroserviceCommunication, Callable[[msCommTypes.MicroserviceCommunication],Empty ]], None]):
+    def __init__(
+        self,
+        grpc_addr,
+        msCommHandler: Callable[
+            [
+                msCommTypes.MicroserviceCommunication,
+                Callable[[msCommTypes.MicroserviceCommunication], Empty],
+            ],
+            None,
+        ],
+    ):
         self.grpc_addr = grpc_addr
         super().__init__(None, None)
         self.callback: CallbackType = msCommHandler
 
-        self.server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
-        healthServer.add_HealthServicer_to_server(HealthServicer(self.logger), self.server)
-        msCommServer.add_MicroserviceServicer_to_server(MicroserviceServicer(msCommHandler, self.logger), self.server)
+        # Increase max message size to 10MB for large model updates
+        options = [
+            ("grpc.max_send_message_length", 10 * 1024 * 1024),
+            ("grpc.max_receive_message_length", 10 * 1024 * 1024),
+        ]
+
+        self.server = grpc.server(
+            futures.ThreadPoolExecutor(max_workers=10), options=options
+        )
+        healthServer.add_HealthServicer_to_server(
+            HealthServicer(self.logger), self.server
+        )
+        msCommServer.add_MicroserviceServicer_to_server(
+            MicroserviceServicer(msCommHandler, self.logger), self.server
+        )
 
         self.server.add_insecure_port(self.grpc_addr)
         self.stop_event = threading.Event()

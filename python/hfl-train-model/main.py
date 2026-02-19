@@ -1,3 +1,4 @@
+import base64
 import json
 import os
 import sys
@@ -72,15 +73,37 @@ def load_data(file_path: str):
     return dataset
 
 
+# def serialise_array(array):
+#     return json.dumps([str(array.dtype), array.tobytes().decode("latin1"), array.shape])
+
+
+# def deserialise_array(string, hook=None):
+#     encoded_data = json.loads(string, object_pairs_hook=hook)
+#     dataType = np.dtype(encoded_data[0])
+#     dataArray = np.frombuffer(encoded_data[1].encode("latin1"), dataType)
+
+
+#     if len(encoded_data) > 2:
+#         return dataArray.reshape(encoded_data[2])
+#     return dataArray
 def serialise_array(array):
-    return json.dumps([str(array.dtype), array.tobytes().decode("latin1"), array.shape])
+    """Serialize numpy array more efficiently using base64."""
+    return json.dumps(
+        [
+            str(array.dtype),
+            base64.b64encode(array.tobytes()).decode("ascii"),
+            array.shape,
+        ]
+    )
 
 
 def deserialise_array(string, hook=None):
+    """Deserialize numpy array from base64."""
     encoded_data = json.loads(string, object_pairs_hook=hook)
     dataType = np.dtype(encoded_data[0])
-    dataArray = np.frombuffer(encoded_data[1].encode("latin1"), dataType)
-
+    dataArray = np.frombuffer(
+        base64.b64decode(encoded_data[1].encode("ascii")), dataType
+    )
     if len(encoded_data) > 2:
         return dataArray.reshape(encoded_data[2])
     return dataArray
@@ -285,7 +308,10 @@ def main():
     global hfl_server
 
     # data = load_data(config.dataset_filepath)
-    hfl_server = HFLServer(config.dataset_filepath)
+    row_ids = list(range(26032))
+    hfl_server = HFLServer(
+        config.dataset_filepath, row_ids=row_ids, row_count=len(row_ids), zipf_rank=1
+    )
 
     ms_config = NewConfiguration(config.service_name, config.grpc_addr, request_handler)
 

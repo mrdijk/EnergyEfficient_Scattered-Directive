@@ -12,15 +12,16 @@ Notes:
 Author: Jorrit Stutterheim
 """
 
-import grpc
 import time
-from .base_client import BaseClient
-from .rabbit_client import RabbitClient
+
+import grpc
+import health_pb2 as healthTypes
+import health_pb2_grpc as healthServer
+import microserviceCommunication_pb2_grpc as msCommServer
 from opentelemetry.instrumentation.grpc import GrpcInstrumentorClient
 
-import health_pb2_grpc as healthServer
-import health_pb2 as healthTypes
-import microserviceCommunication_pb2_grpc as msCommServer
+from .base_client import BaseClient
+from .rabbit_client import RabbitClient
 
 
 class GRPCClient(BaseClient):
@@ -65,7 +66,13 @@ class GRPCClient(BaseClient):
             Exception: If unable to connect to the gRPC server after 7 retries.
 
         """
-        channel = grpc.insecure_channel(grpc_addr)
+        # Increase max message size to 10MB for large model updates
+        options = [
+            ("grpc.max_send_message_length", 10 * 1024 * 1024),
+            ("grpc.max_receive_message_length", 10 * 1024 * 1024),
+        ]
+
+        channel = grpc.insecure_channel(grpc_addr, options=options)
         grpc_server_instrumentor = GrpcInstrumentorClient()
         grpc_server_instrumentor.instrument(channel=channel)
 
@@ -75,7 +82,9 @@ class GRPCClient(BaseClient):
                 health_stub = healthServer.HealthStub(channel)
                 response = health_stub.Check(healthTypes.HealthCheckRequest())
                 if response.status == healthTypes.HealthCheckResponse.SERVING:
-                    self.logger.info(f"Successfully connected to gRPC server at {grpc_addr}")
+                    self.logger.info(
+                        f"Successfully connected to gRPC server at {grpc_addr}"
+                    )
                     return channel  # Return the channel
             except grpc.RpcError as e:
                 self.logger.warning(f"Could not check: {e.details()}")
