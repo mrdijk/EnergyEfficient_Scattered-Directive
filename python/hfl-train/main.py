@@ -1,5 +1,5 @@
 import base64
-import gzip
+# import gzip
 import json
 import os
 import sys
@@ -10,7 +10,7 @@ from collections import OrderedDict
 
 import microserviceCommunication_pb2 as msCommTypes
 import numpy as np
-import pandas as pd
+# import pandas as pd
 import rabbitMQ_pb2 as rabbitTypes
 import torch
 import torch.nn as nn
@@ -70,7 +70,7 @@ class SVHN_Model(nn.Module):
         super(SVHN_Model, self).__init__()
         self.fc3 = nn.Linear(3072, 512)  # 32x32x3
         self.fc5 = nn.Linear(512, 10)
-        self.size = float(6.1)  # Mb todo
+        self.size = float(6.1)  # Mb
 
     def forward(self, xb):
         out = xb.view(-1, 3072)
@@ -135,6 +135,7 @@ class HFLClient:
         zipf_rank: int = 0,
         row_count: int = 0,
         learning_rate: float = 0.1,
+        iid : int = 10,
         batch_size: int = 128,
         model_state=None,
     ):
@@ -145,6 +146,7 @@ class HFLClient:
             zipf_rank: Rank of the partition (1 to N, N being the number of total partitions)
             row_count: Number of rows in partition
             learning_rate: Learning rate for optimizer based on Drainakis et al.
+            iid: Numbber of classes selected for training
             batch_size: batch size for training based on Drainakis et al.
             model_state: Optional pre-trained model state dict
         """
@@ -155,6 +157,7 @@ class HFLClient:
         self.row_count = row_count
         self.row_ids = row_ids
 
+
         # Initialize model
         self.model = SVHN_Model()
 
@@ -164,7 +167,7 @@ class HFLClient:
         self.criterion = nn.CrossEntropyLoss()
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
 
-    def train_local(self, epochs: int = 25, batch_size: int = 128):
+    def train_local(self, epochs: int = 1, batch_size: int = 128):
         """Perform local training on partitioned data."""
         self.model.train()
 
@@ -204,7 +207,7 @@ class HFLClient:
         accuracy = correct / total if total > 0 else 0
         return accuracy
 
-    def get_model_update(self):
+    def get_model_updates(self):
         """Serialize model parameters and sample count."""
         state_dict = self.model.state_dict()
         params = []
@@ -223,7 +226,7 @@ class HFLClient:
                 k = entry.get("key")
                 serialized = entry.get("value")
                 nd = deserialise_array(serialized)
-                state_dict[k] = torch.from_numpy(nd).float()
+                state_dict[k] = torch.from_numpy(nd.copy()).float()
             self.model.load_state_dict(state_dict)
             logger.info("Global model loaded successfully.")
         except Exception as e:
@@ -272,7 +275,7 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication, ctx: Context 
                 epochs = int(request.data.get("epochs", 1))
 
                 hfl_client.train_local(epochs=epochs, batch_size=batch_size)
-                model_update_json = hfl_client.get_model_update()
+                model_update_json = hfl_client.get_model_updates()
                 acc = hfl_client.evaluate()
                 logger.info(f"Local model accuracy is {acc}")
 
@@ -311,11 +314,10 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication, ctx: Context 
                 logger.info(f"request: {request.data}")
                 partition_config = request.data.get("partition", {})
                 learning_rate = request.data.get("learning_rate", 0.1)
-
+                iid = int(request.data.get("iid", 10))
                 partition_dict = MessageToDict(partition_config.struct_value)
 
                 # Access partition fields
-                # row_ids = partition_dict.get("row_ids", {})
                 zipf_rank = int(partition_dict.get("zipf_rank", 0))
                 row_count = int(partition_dict.get("row_count", 0))
                 row_ids = [int(r) for r in partition_dict.get("row_ids", [])]
@@ -333,6 +335,7 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication, ctx: Context 
                             row_count=row_count,
                             zipf_rank=zipf_rank,
                             row_ids=row_ids,
+                            iid=iid,
                             learning_rate=learning_rate,
                         )
                         logger.info(
@@ -345,8 +348,6 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication, ctx: Context 
                     logger.info("HFL client already initialized")
 
                 # Send response back
-                # response_data = Struct()
-                # response_data.update({"status": "ready", "rank": hfl_client.rank})
                 ms_config.next_client.ms_comm.send_data(msComm, msComm.data, {})
 
             else:

@@ -159,11 +159,18 @@ func (zpb *ZipfPartitionBuilder) PrintConfigurationSummary(config *PartitionConf
 	}
 }
 
-func makePartitionConfiguration(nrPartitions int, totalRows int, zipfExponent float64, seed int64) *PartitionConfiguration {
+func makePartitionConfiguration(nrPartitions int, totalRows int, sigma float64, seed int64) *PartitionConfiguration {
 	// Create builder
 	builder := NewZipfPartitionBuilder(seed)
 
 	// Generate all partitions
+	// Convert exponent to same sigma as in Drainakis et al.
+	// Correct zipfExponent = 1 / σ
+	// σ = 1.7 → s = 0.588
+	// σ = 2.0 → s = 0.500
+	// σ = 2.3 → s = 0.435
+	// σ = 1000 → s = 0.001
+	zipfExponent := 1 / sigma
 	config := builder.BuildConfiguration(nrPartitions, totalRows, zipfExponent)
 	// And assign row IDs
 	builder.AssignRowsToPartitions(config)

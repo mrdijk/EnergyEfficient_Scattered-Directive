@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from hfl_data.svhn_dataset import SVHNDataset, get_svhn_transforms
+from numpy.typing import test
 from torch.utils.data import DataLoader
 
 # ---------------------- SET SEED FOR REPRODUCIBILITY ----------------------
@@ -366,7 +367,8 @@ for rnd in range(TOTAL_ROUNDS):
         }
     )
 
-Z_list = [400, 360, 330, 300, 260, 230, 190, 150, 120, 90, 60, 30, 15]
+Z_list = [15, 30, 60, 90, 120, 150, 190, 230, 260, 300, 330, 360, 400]
+
 Kappa_list = [5, 10, 20]
 # eed_list = [1.7, 2, 2.3, 1000]
 # iid_list = [7, 5, 3, -1]

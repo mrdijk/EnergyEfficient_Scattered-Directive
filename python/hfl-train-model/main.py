@@ -9,7 +9,7 @@ from collections import OrderedDict
 
 import microserviceCommunication_pb2 as msCommTypes
 import numpy as np
-import pandas as pd
+# import pandas as pd
 import rabbitMQ_pb2 as rabbitTypes
 import torch
 import torch.nn as nn
@@ -114,7 +114,7 @@ class SVHN_Model(nn.Module):
         super(SVHN_Model, self).__init__()
         self.fc3 = nn.Linear(3072, 512)  # 32x32x3
         self.fc5 = nn.Linear(512, 10)
-        self.size = float(6.1)  # Mb todo
+        self.size = float(6.1)  # Mb 
 
     def forward(self, xb):
         out = xb.view(-1, 3072)
@@ -152,6 +152,10 @@ class HFLServer:
             file_path: Path to .tar.gz file containing images
             row_ids: List of specific row indices to use for this partition
             learning_rate: Learning rate for optimizer
+            zipf_rank: Rank of the partition (1 to N, N being the number of total partitions)
+            row_count: Number of  rows in partition
+            learning_rate: Learning rate for optimizer based on Drainakis et al.
+            batch_size: Batch size for training based on Drainakis et al.
             model_state: Optional pre-trained model state dict
         """
         transform = get_svhn_transforms()
@@ -168,43 +172,93 @@ class HFLServer:
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
 
     def aggregate_fit(self, client_updates):
-        """
-        Perform FedAvg aggregation of client model updates.
-        client_updates: list of dicts with keys {num_samples, params}
-        """
+        """Perform FedAvg aggregation of client model updates."""
         try:
+            logger.info(f"Received {len(client_updates)} client updates")
+            logger.debug(
+                f"First update keys: {client_updates[0].keys() if len(client_updates) > 0 else 'no updates'}"
+            )
+
+            if len(client_updates) == 0:
+                logger.error("No client updates to aggregate")
+                return
+
+            # Debug: check structure of params
+            logger.debug(f"Type of params: {type(client_updates[0]['params'])}")
+            logger.debug(
+                f"Params content: {client_updates[0]['params'] if isinstance(client_updates[0]['params'], dict) else 'not a dict'}"
+            )
+
             total_samples = sum(update["num_samples"] for update in client_updates)
-            keys = [k for k, _ in client_updates[0]["params"]]
+
+            # Deserialize all updates
+            deserialized_updates = []
+            for i, update in enumerate(client_updates):
+                logger.debug(
+                    f"Processing update {i}: num_samples={update['num_samples']}, params type={type(update['params'])}"
+                )
+
+                # Check if params is already a dict or needs conversion
+                if isinstance(update["params"], dict):
+                    params_dict = {
+                        k: deserialise_array(serialized)
+                        if isinstance(serialized, str)
+                        else serialized
+                        for k, serialized in update["params"].items()
+                    }
+                elif isinstance(update["params"], list):
+                    # Params is a list of [key, value] or [key, serialized]
+                    params_dict = {}
+                    for entry in update["params"]:
+                        if isinstance(entry, (list, tuple)) and len(entry) == 2:
+                            k, val = entry
+                            params_dict[k] = (
+                                deserialise_array(val) if isinstance(val, str) else val
+                            )
+                        else:
+                            logger.error(f"Unexpected params entry format: {entry}")
+                else:
+                    logger.error(f"Unexpected params type: {type(update['params'])}")
+                    continue
+
+                deserialized_updates.append(
+                    {"num_samples": update["num_samples"], "params": params_dict}
+                )
+
+            if len(deserialized_updates) == 0:
+                logger.error("No valid updates after deserialization")
+                return
+
+            # Get keys
+            keys = list(deserialized_updates[0]["params"].keys())
+            logger.info(f"Model has {len(keys)} parameters: {keys}")
+
+            # Weighted average
             accum = {
-                k: np.zeros_like(client_updates[0]["params"][i][1], dtype=np.float64)
-                for i, k in enumerate(keys)
+                k: np.zeros_like(deserialized_updates[0]["params"][k], dtype=np.float64)
+                for k in keys
             }
 
-            for update in client_updates:
+            for update in deserialized_updates:
                 weight = update["num_samples"] / total_samples
-                for k, nd in update["params"]:
-                    accum[k] += nd.astype(np.float64) * weight
+                for k in keys:
+                    accum[k] += update["params"][k].astype(np.float64) * weight
 
-            averaged = [(k, accum[k].astype(np.float32)) for k in keys]
-            state_dict = OrderedDict()
-            for k, nd in averaged:
-                state_dict[k] = torch.from_numpy(nd)
+            # Load into model
+            state_dict = OrderedDict(
+                (k, torch.from_numpy(accum[k].astype(np.float32))) for k in keys
+            )
             self.model.load_state_dict(state_dict)
 
+            logger.info(f"Successfully aggregated {len(client_updates)} updates")
+
         except Exception as e:
-            logger.error(f"FedAvg aggregation failed: {e}")
-            raise e
+            logger.error(f"Aggregation failed: {e}")
+            logger.error(f"Error at line: {e.__traceback__.tb_lineno}")
+            import traceback
 
-        logger.info("FedAvg Succesful")
-
-        # Serialize averaged model parameters for clients
-        np_params = []
-        for k, v in self.model.state_dict().items():
-            np_params.append(
-                {"key": k, "value": serialise_array(v.detach().cpu().numpy())}
-            )
-        # data.update({"global_params": json.dumps(np_params)})
-        return json.dumps(np_params)
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            raise
 
     def evaluate(self):
         """Evaluate on partitioned data."""
@@ -224,41 +278,86 @@ class HFLServer:
         accuracy = correct / total if total > 0 else 0
         return accuracy
 
+    def get_model_params(self):
+        """Get serialized global model parameters."""
+        state_dict = self.model.state_dict()
+        params = []
+        for k, v in state_dict.items():
+            nd = v.detach().cpu().numpy()
+            params.append({"key": k, "value": serialise_array(nd)})
+        return params
+
 
 def handleAggregateRequest(msComm):
     global ms_config
     global hfl_server
-
     request = rabbitTypes.Request()
     msComm.original_request.Unpack(request)
-
     try:
+        start = time.perf_counter()
         data = request.data["model_updates"]
+        logger.info(f"Received model_updates, type: {type(data)}")
+        logger.debug(f"List values count: {len(data.list_value.values)}")
         client_updates = []
-        for update_struct in data.list_value.values:
+        for idx, update_struct in enumerate(data.list_value.values):
             update_obj = json.loads(update_struct.string_value)
+            
+            if len(update_obj["params"]) > 0:
+                logger.debug(f"First param entry: {update_obj['params'][0]}")
+            
+            # params is a list of [key, serialized_value]
+            # Convert to dict of {key: deserialized_value}
+            params_dict = {}
+            for entry_idx, entry in enumerate(update_obj["params"]):
+                try:
+                    k = entry[0]  # key
+                    serialized = entry[1]  # serialized array
+                    params_dict[k] = deserialise_array(serialized)
+                    logger.debug(
+                        f"Deserialized param {entry_idx}: {k}, shape: {params_dict[k].shape}"
+                    )
+                except Exception as e:
+                    logger.error(f"Error deserializing entry {entry_idx}: {e}")
+                    logger.error(f"Entry content: {entry}")
+                    raise
+            
             upd = {
                 "num_samples": update_obj["num_samples"],
-                "params": [(k, deserialise_array(v)) for k, v in update_obj["params"]],
+                "params": params_dict,
             }
             client_updates.append(upd)
+            
     except Exception as e:
         logger.error(f"Error deserializing client model updates: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         return
-
-    data = Struct()
+    
     logger.info("Performing FedAvg aggregation from client updates.")
-
-    start = time.perf_counter()
-    agg_result = hfl_server.aggregate_fit(client_updates)
+    hfl_server.aggregate_fit(client_updates)
     agg_duration = (time.perf_counter() - start) * 1000
     accuracy = hfl_server.evaluate()
-
     logger.info(f"Aggregation duration: {agg_duration:.2f}ms")
+    
+    # Get global model params
+    global_params = hfl_server.get_model_params()
+    
+    if global_params is None or len(global_params) == 0:
+        logger.error("No global parameters returned from get_model_params!")
+        return
+    
+    logger.info(f"Got {len(global_params)} parameters from global model")
+    
+    # CRITICAL FIX: Serialize to JSON string
+    global_params_json = json.dumps(global_params)
+    logger.info(f"Serialized global params: {len(global_params_json)} bytes")
+    
+    # Send as JSON string, not list
+    data = Struct()
     data.update({"accuracy": accuracy})
-    data.update({"global_params": agg_result})
+    data.update({"global_params": global_params_json})  # Send as JSON string
     data.update({"t_agg": agg_duration})
-
+    
     ms_config.next_client.ms_comm.send_data(msComm, data, {})
 
 

@@ -305,7 +305,7 @@ func startTraining(protoRequest *pb.RequestApproval, dataRequestInterface map[st
 
 }
 
-func runHFLTrainingRound(dataRequest map[string]any, clients map[string]string, serverAuth, serverUrl string, learning_rate float64) (RoundMetrics, error) {
+func runHFLTrainingRound(dataRequest map[string]any, clients map[string]string, serverAuth, serverUrl string, learningRate float64) (RoundMetrics, error) {
 	var wg sync.WaitGroup
 	var mu sync.Mutex // Add mutex
 	clientUpdates := map[string]string{}
@@ -327,7 +327,7 @@ func runHFLTrainingRound(dataRequest map[string]any, clients map[string]string, 
 		endpoint := fmt.Sprintf("http://%s:8080/agent/v1/hflTrainRequest/%s", url, target)
 		dataRequest["type"] = "hflTrainRequest"
 		dataRequest["data"] = map[string]any{
-			"learning_rate": learning_rate,
+			"learning_rate": learningRate,
 		}
 
 		dataRequestJson, err := json.Marshal(dataRequest)
@@ -339,25 +339,29 @@ func runHFLTrainingRound(dataRequest map[string]any, clients map[string]string, 
 		go func(auth string, endpoint string) {
 			defer wg.Done()
 			logger.Sugar().Infof("Sending training request to: %s", auth)
-
 			responseData, err := sendData(endpoint, dataRequestJson)
 			if err != nil {
 				logger.Sugar().Errorf("Error sending data to client %s: %v", auth, err)
 				return
 			}
-
 			responseJson := &pb.MicroserviceCommunication{}
 			err = json.Unmarshal([]byte(responseData), responseJson)
 			if err != nil {
 				logger.Sugar().Errorf("Error unmarshalling client %s response: %v", auth, err)
 				return
 			}
-
 			dataJson := responseJson.Data.AsMap()
 			modelUpdate, ok := dataJson["model_update"].(string)
+
+			if !ok {
+				logger.Sugar().Errorf("No model_update found in client %s response.", auth)
+				return // Return early if no model update
+			}
+
 			client_accuracy := dataJson["accuracy"].(float64)
 			training_duration := dataJson["t_train"].(float64)
-			// Use mutex to update to avoid race condition
+
+			// Use mutex to update everything at once
 			mu.Lock()
 			total_time_per_round += training_duration
 			clientMetricsList = append(clientMetricsList, ClientMetrics{
@@ -365,24 +369,22 @@ func runHFLTrainingRound(dataRequest map[string]any, clients map[string]string, 
 				Accuracy:     client_accuracy,
 				TrainingTime: training_duration,
 			})
-			if ok {
-				clientUpdates[strings.ToLower(auth)] = modelUpdate
-			}
+			clientUpdates[strings.ToLower(auth)] = modelUpdate // Only update once, inside mutex
 			mu.Unlock()
 
-			// logger.Sugar().Infof("Local training duration for %s: %f ms", auth,  training_duration)
-			if !ok {
-				logger.Sugar().Errorf("No model_update found in client %s response.", auth)
-				return
-			}
-
-			clientUpdates[strings.ToLower(auth)] = modelUpdate
+			logger.Sugar().Infof("Received update from %s: %d bytes", auth, len(modelUpdate))
 		}(auth, endpoint)
 	}
 
 	wg.Wait()
 
-	logger.Sugar().Infof("Total training time for this round[ms]: %f", total_time_per_round)
+	// logger.Sugar().Infof("Collected %d client updates from %d clients", len(clientUpdates), len(clients))
+	// for auth, update := range clientUpdates {
+	// 	logger.Sugar().Debugf("Client %s: update size = %d bytes", auth, len(update))
+	// }
+
+	// logger.Sugar().Infof("Total training time for this round[ms]: %f", total_time_per_round)
+
 	// Send all client model updates to server for aggregation
 	target := strings.ToLower(serverAuth)
 	serverEndpoint := fmt.Sprintf("http://%s:8080/agent/v1/hflTrainRequest/%s", serverUrl, target)
@@ -392,16 +394,24 @@ func runHFLTrainingRound(dataRequest map[string]any, clients map[string]string, 
 		updateList = append(updateList, update)
 	}
 
+	logger.Sugar().Infof("Sending %d updates to server for aggregation", len(updateList))
+
 	dataRequest["type"] = "hflAggregateRequest"
 	dataRequest["data"] = map[string]any{
 		"model_updates": updateList,
 	}
+
+	// Debug: log the structure
+	logger.Sugar().Debugf("Data request structure: type=%s, updates_count=%d",
+		dataRequest["type"], len(updateList))
 
 	dataRequestJson, err := json.Marshal(dataRequest)
 	if err != nil {
 		logger.Sugar().Errorf("Error marshalling server aggregation request: %v", err)
 		return RoundMetrics{}, err
 	}
+
+	// logger.Sugar().Debugf("Request JSON size: %d bytes", len(dataRequestJson))
 
 	responseData, err := sendData(serverEndpoint, dataRequestJson)
 	if err != nil {
@@ -415,11 +425,19 @@ func runHFLTrainingRound(dataRequest map[string]any, clients map[string]string, 
 		logger.Sugar().Error("Unmarshalling server response failed: ", err)
 	}
 
+	// Debug what we received
+	// logger.Sugar().Infof("Server response data fields: %+v", serverResponse.Data.GetFields())
+
 	accuracy := serverResponse.Data.GetFields()["accuracy"].GetNumberValue()
 	aggregation_duration := serverResponse.Data.GetFields()["t_agg"].GetNumberValue()
-	// logger.Sugar().Infof("Aggregration durarion: %f ms", aggregation_duration)
-	// loss := serverResponse.Data.GetFields()["loss"].GetNumberValue()
 	globalParams := serverResponse.Data.GetFields()["global_params"].GetStringValue()
+
+	// logger.Sugar().Infof("GlobalParams length: %d bytes", len(globalParams))
+	// logger.Sugar().Infof("GlobalParams first 100 chars: %s", globalParams[:min(100, len(globalParams))])
+
+	if globalParams == "" {
+		logger.Sugar().Error("- Received empty params from server")
+	}
 
 	// Send the new global model to all clients
 	for auth, url := range clients {
@@ -468,16 +486,19 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 	var serverUrl string
 	var serverAuth string
 	var finalAccuracy float64
-	var cycles int64 = 10
-	var learningRate float64 = 0.05
+	var cycles int = 10
+	var learningRate float64 = 0.01
 	// var change_policies int64 = -1
 	var dataProviders []string = []string{}
 
 	// Zipf Partition Configuration
 	var nrPartitions int = 20
 	var totalRows int = 531130
-	// 0: uniform
-	var zipfExponent float64 = 0
+	// iid represents the number of classes present in the client datasets
+	var sigma_iid int = 0
+	// ed represents the distribution of dataset sizes
+	// Large sigma represent a balanced distribution as sigma aproaches 1 the distribution becomes more skewed
+	var sigma_ed float64 = 0
 	var seed int64 = time.Now().UnixNano()
 
 	var wg sync.WaitGroup
@@ -490,26 +511,29 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 
 	if ok {
 		if val, ok := data["cycles"].(float64); ok {
-			cycles = int64(val)
+			cycles = int(val)
 		}
-		if val, ok := data["learning_rate"].(float64); ok {
-			learningRate = val
-		}
+		// if val, ok := data["learning_rate"].(float64); ok {
+		// 	learningRate = val
+		// }
 		if val, ok := data["partitions"].(int); ok {
 			nrPartitions = val
 		}
-		if val, ok := data["zipf"].(float64); ok {
-			zipfExponent = val
+		if val, ok := data["iid"].(int); ok {
+			sigma_iid = val
+		}
+		if val, ok := data["ed"].(float64); ok {
+			sigma_ed = val
 		}
 	}
 
-	partitionConfig := makePartitionConfiguration(nrPartitions, totalRows, zipfExponent, seed)
+	partitionConfig := makePartitionConfiguration(nrPartitions, totalRows, sigma_ed, seed)
 	trainingFailed := false
 
 	// Check first partition
-	fmt.Printf("Partition 1: RowCount=%d, len(RowIDs)=%d\n",
-		partitionConfig.Partitions[0].RowCount,
-		len(partitionConfig.Partitions[0].RowIDs))
+	// fmt.Printf("Partition 1: RowCount=%d, len(RowIDs)=%d\n",
+	// 	partitionConfig.Partitions[0].RowCount,
+	// 	len(partitionConfig.Partitions[0].RowIDs))
 	for auth, url := range authorizedProviders {
 		if strings.ToLower(auth) == "server" {
 			serverUrl = url
@@ -524,8 +548,8 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 	numClients := len(clients)
 	selectedPartitions := selectRandomPartitions(partitionConfig.Partitions, numClients)
 
-	logger.Sugar().Infof("Selected %d partitions for %d clients", len(selectedPartitions), numClients)
-	logger.Sugar().Info("Sending ping to start pods...")
+	// logger.Sugar().Infof("Selected %d partitions for %d clients", len(selectedPartitions), numClients)
+	// logger.Sugar().Info("Sending ping to start pods...")
 
 	// The server has a test set with 26033 samples
 	serverRowIDs := make([]int, 26033)
@@ -533,11 +557,13 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 		serverRowIDs[i] = i
 	}
 
+	// Partition for the server contains 100% the data from the test set
+	// Since there is only one partition for this dataset it gets rank 1
 	serverPartition := Partition{
 		Rank:        1,
 		RowCount:    26032,
 		Probability: 1,
-		Percentage:  1,
+		Percentage:  100,
 		RowIDs:      serverRowIDs,
 	}
 
@@ -585,6 +611,7 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 			dataRequest["type"] = "hflPingRequest"
 			dataRequest["data"] = map[string]any{
 				"partition": partition, // Single partition, not array
+				"iid":       sigma_iid,
 			}
 
 			dataRequestJson, err := json.Marshal(dataRequest)
@@ -671,7 +698,7 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 	results.StartTime = start
 
 TrainLoop:
-	for round := int64(0); round < cycles; round++ {
+	for round := int(1); round <= cycles; round++ {
 		logger.Sugar().Info("Running HFL training round ", round)
 
 		protoRequest := &pb.RequestApproval{
@@ -726,7 +753,6 @@ TrainLoop:
 		}
 
 		logger.Sugar().Info("Sending training requests")
-		// accuracy, training_duration, err := runHFLTrainingRound(dataRequest, clients, serverAuth, serverUrl, learning_rate)
 		RoundMetrics, err := runHFLTrainingRound(dataRequest, clients, serverAuth, serverUrl, learningRate)
 		if err != nil {
 			logger.Sugar().Errorf("Round %d failed: %v", round, err)

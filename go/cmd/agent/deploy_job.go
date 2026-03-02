@@ -196,7 +196,7 @@ func addSidecar() v1.Container {
 
 	repositoryName := os.Getenv("SIDECAR_REPOSITORY_NAME")
 	if repositoryName == "" {
-		repositoryName = "javernus"
+		repositoryName = "mdijk"
 	}
 
 	sidecarTag := getMicroserviceTag(sidecarName)

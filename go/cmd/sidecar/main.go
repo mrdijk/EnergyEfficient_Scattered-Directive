@@ -41,7 +41,13 @@ func setupListener() net.Listener {
 }
 
 func setupGRPCServer() (*grpc.Server, *serverInstance) {
-	grpcServer := grpc.NewServer(grpc.StatsHandler(&ocgrpc.ServerHandler{}))
+	// Create new grppServer with increased max message size: 4MB -> 10MB
+	grpcServer := grpc.NewServer(
+		grpc.StatsHandler(&ocgrpc.ServerHandler{}),
+		// Increase max message size to 200MB
+		grpc.MaxRecvMsgSize(200*1024*1024),
+		grpc.MaxSendMsgSize(200*1024*1024),
+	)
 
 	// register RabbitMQ, Etcd, and Microservice services on the gRPC server
 	sideCarServer := &serverInstance{}

@@ -115,7 +115,7 @@ def get_energy_consumption(start, end):
 
 
 # Main function to execute the experiment
-def run_experiment(output_dir, providers):
+def run_experiment(output_dir, providers, exp_z, exp_ed, exp_iid):
     results = []
     requests_url = constants.APPROVAL_URL
 
@@ -126,6 +126,10 @@ def run_experiment(output_dir, providers):
     print(f"Using the followiong clients for training {providers}")
     hfl_request_body["dataProviders"] = providers
     hfl_request_body["data_request"]["data"]["cycles"] = exp_cycles
+    hfl_request_body["data_request"]["data"]["partitions"] = exp_z
+    hfl_request_body["data_request"]["data"]["ed"] = exp_ed
+    hfl_request_body["data_request"]["data"]["iid"] = exp_iid
+
 
     # Execute HFL request, using specific headers created for FABRIC
     request_response = requests.post(
@@ -210,54 +214,31 @@ def format_timestamp():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run energy efficiency experiment")
-    parser.add_argument(
-        "--exp_clients",
-        type=int,
-        required=False,
-        help="The number of expected clients')",
-    )
-    parser.add_argument(
-        "--exp_cycles", type=int, help="The number of rounds that are performed"
-    )
-    parser.add_argument(
-        "--exp_size",
-        type=str,
-        required=False,
-        help="Select 'exp_clients' smallest or largest clients",
-    )
+    parser.add_argument("--exp_clients", type=int, required=False, default=5, help="The number of expected clients" )
+    parser.add_argument("--exp_cycles", type=int, default=25, help="The number of rounds that are performed")
+    parser.add_argument("--exp_z", type=int, required=True, help="The number of partitions created")
+    parser.add_argument("--exp_ed", type=float, required=True, help="Skew parameter used in Zipf distribution")
+    parser.add_argument("--exp_iid", type=int, required=True, help="Number of classes that should be present in the client datasets")
+    parser.add_argument("--timestamp", type=str, required=False, default=None)
     args = parser.parse_args()
 
     exp_clients: int = args.exp_clients
     exp_cycles: int = args.exp_cycles
-    exp_size: str = args.exp_size
+    exp_z: int = args.exp_z
+    exp_ed: float = args.exp_ed
+    exp_iid: int = args.exp_iid
+    timestamp = args.timestamp if args.timestamp else format_timestamp()
 
     output_dir = os.path.join(
         "experiments/data",
-        f"{exp_clients}",
-        f"{exp_cycles}",
-        f"{format_timestamp()}_{exp_size}",
+        f"K{exp_clients:02d}",  # Top level: number of clients
+        f"Z{exp_z:03d}_ed{str(exp_ed).replace('.', 'p')}_iid{exp_iid}",  # Config variation (e.g.: Z015_ed1000p0_iid10)
+        timestamp
     )
 
-    sorted_clients: list[tuple[str, int]] = sorted(
-        constants.DATA_PROVIDERS.items(), key=lambda x: x[1]
-    )
-
-    if exp_size == "large":
-        providers: list[str] = ["server"] + [
-            client for client, _ in sorted_clients[-exp_clients:]
-        ]
-    elif exp_size == "small":
-        providers = ["server"] + [client for client, _ in sorted_clients[:exp_clients]]
-    else:
-        sample = random.sample(list(constants.DATA_PROVIDERS.keys()), exp_clients)
-        providers = ["server"] + sample
-    print("Running experiments with the following clients\n")
-    print("Client: #Rows")
-    for p in providers:
-        if p == "server":
-            continue
-        print(p, ": ", constants.DATA_PROVIDERS[p])
-
+    # Use the first 5 clients
+    data_providers = ["server"] + ["client1", "client2", "client3", "client4", "client5"]
     print("\nStarting experiment")
-    run_experiment(output_dir, providers)
+    # run_experiment(output_dir, data_providers, exp_z, exp_ed, exp_iid)
     print("Restart of DYNAMOS required!")
+    # print(output_dir)

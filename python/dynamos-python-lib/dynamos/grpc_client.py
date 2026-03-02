@@ -66,10 +66,10 @@ class GRPCClient(BaseClient):
             Exception: If unable to connect to the gRPC server after 7 retries.
 
         """
-        # Increase max message size to 10MB for large model updates
+        # Increase max message size to 200MB for large model updates
         options = [
-            ("grpc.max_send_message_length", 10 * 1024 * 1024),
-            ("grpc.max_receive_message_length", 10 * 1024 * 1024),
+            ("grpc.max_send_message_length", 200 * 1024 * 1024),
+            ("grpc.max_receive_message_length", 200 * 1024 * 1024),
         ]
 
         channel = grpc.insecure_channel(grpc_addr, options=options)
