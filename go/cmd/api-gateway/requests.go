@@ -516,17 +516,18 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 		// if val, ok := data["learning_rate"].(float64); ok {
 		// 	learningRate = val
 		// }
-		if val, ok := data["partitions"].(int); ok {
-			nrPartitions = val
+		if val, ok := data["partitions"].(float64); ok {
+			nrPartitions = int(val)
 		}
-		if val, ok := data["iid"].(int); ok {
-			sigma_iid = val
+		if val, ok := data["iid"].(float64); ok {
+			sigma_iid = int(val)
 		}
 		if val, ok := data["ed"].(float64); ok {
 			sigma_ed = val
 		}
 	}
 
+	logger.Sugar().Infof("Creating partitions with the following values: z=%d, ed=%d", nrPartitions, sigma_ed)
 	partitionConfig := makePartitionConfiguration(nrPartitions, totalRows, sigma_ed, seed)
 	trainingFailed := false
 

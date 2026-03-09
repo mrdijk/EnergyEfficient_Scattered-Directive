@@ -1,4 +1,5 @@
 import base64
+
 # import gzip
 import json
 import os
@@ -10,6 +11,7 @@ from collections import OrderedDict
 
 import microserviceCommunication_pb2 as msCommTypes
 import numpy as np
+
 # import pandas as pd
 import rabbitMQ_pb2 as rabbitTypes
 import torch
@@ -21,7 +23,7 @@ from dynamos.signal_flow import signal_continuation, signal_wait
 from google.protobuf.empty_pb2 import Empty
 from google.protobuf.json_format import MessageToDict
 from google.protobuf.struct_pb2 import Struct
-from hfl_data import SVHNDataset, get_svhn_transforms
+from hfl_data import SVHN_Dataset, SVHN_Model, get_svhn_transforms
 from opentelemetry.context.context import Context
 
 np.set_printoptions(threshold=sys.maxsize)
@@ -60,43 +62,29 @@ def load_data(file_path: str):
         logger.info("Extraction complete")
 
     transform = get_svhn_transforms(train=True)
-    dataset = SVHNDataset(extract_dir, transform=transform)
+    dataset = SVHN_Dataset(extract_dir, transform=transform)
 
     return dataset
 
 
-class SVHN_Model(nn.Module):
-    def __init__(self):
-        super(SVHN_Model, self).__init__()
-        self.fc3 = nn.Linear(3072, 512)  # 32x32x3
-        self.fc5 = nn.Linear(512, 10)
-        self.size = float(6.1)  # Mb
+# class SVHN_Model(nn.Module):
+#     def __init__(self):
+#         super(SVHN_Model, self).__init__()
+#         self.fc3 = nn.Linear(3072, 512)  # 32x32x3
+#         self.fc5 = nn.Linear(512, 10)
+#         self.size = float(6.1)  # Mb
 
-    def forward(self, xb):
-        out = xb.view(-1, 3072)
-        out = self.fc3(out)
-        out = F.relu(out)
-        out = self.fc5(out)
-        return F.log_softmax(out, dim=1)
+#     def forward(self, xb):
+#         out = xb.view(-1, 3072)
+#         out = self.fc3(out)
+#         out = F.relu(out)
+#         out = self.fc5(out)
+#         return F.log_softmax(out, dim=1)
 
-    def get_size(self):
-        return self.size
-
-
-# def serialise_array(array):
-#     return json.dumps([str(array.dtype), array.tobytes().decode("latin1"), array.shape])
+#     def get_size(self):
+#         return self.size
 
 
-# def deserialise_array(string, hook=None):
-#     encoded_data = json.loads(string, object_pairs_hook=hook)
-#     dataType = np.dtype(encoded_data[0])
-#     dataArray = np.frombuffer(encoded_data[1].encode("latin1"), dataType)
-
-
-#     if len(encoded_data) > 2:
-#         return dataArray.reshape(encoded_data[2])
-#     return dataArray
-#
 def serialise_array(array):
     """Serialize numpy array more efficiently using base64."""
     return json.dumps(
@@ -135,7 +123,7 @@ class HFLClient:
         zipf_rank: int = 0,
         row_count: int = 0,
         learning_rate: float = 0.1,
-        iid : int = 10,
+        iid: int = 10,
         batch_size: int = 128,
         model_state=None,
     ):
@@ -152,14 +140,15 @@ class HFLClient:
         """
         transform = get_svhn_transforms()
 
-        self.data = SVHNDataset(file_path, transform=transform, row_ids=row_ids)
+        self.data = SVHN_Dataset(
+            file_path, transform=transform, row_ids=row_ids, num_classes=iid
+        )
         self.rank = zipf_rank
         self.row_count = row_count
         self.row_ids = row_ids
 
-
         # Initialize model
-        self.model = SVHN_Model()
+        self.model = SVHN_Model(num_classes=iid)
 
         if model_state is not None:
             self.model.load_state_dict(model_state)
@@ -314,7 +303,7 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication, ctx: Context 
                 logger.info(f"request: {request.data}")
                 partition_config = request.data.get("partition", {})
                 learning_rate = request.data.get("learning_rate", 0.1)
-                iid = int(request.data.get("iid", 10))
+                iid = int(request.data.get("iid", 10).number_value)
                 partition_dict = MessageToDict(partition_config.struct_value)
 
                 # Access partition fields

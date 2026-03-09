@@ -46,7 +46,7 @@ func (zpb *ZipfPartitionBuilder) CalculateHarmonicNumber(n int, s float64) float
 }
 
 // BuildConfiguration creates a partition configuration with row assignments
-func (zpb *ZipfPartitionBuilder) BuildConfiguration(numPartitions, totalRows int, s float64) *PartitionConfiguration {
+func (zpb *ZipfPartitionBuilder) BuildConfiguration(numPartitions int, totalRows int, s float64) *PartitionConfiguration {
 	config := &PartitionConfiguration{
 		NumPartitions: numPartitions,
 		TotalRows:     totalRows,

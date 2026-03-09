@@ -1,266 +1,199 @@
-from glob import glob
+import json
+import os
 from pathlib import Path
 
 import pandas as pd
 
-# import matplotlib.pyplot as plt
 
-DATA_DIR = (
-    "/home/maurits/EnergyEfficient_Scattered-Directive/fabric/data/experiment_data"
-)
-OUTPUT_DIR = "analysis_output"
-Path(OUTPUT_DIR).mkdir(exist_ok=True)
+def parse_experiment_path(path):
+    """Extract experiment parameters from directory structure."""
+    parts = Path(path).parts
+    # Extract K (number of clients)
+    k_part = [p for p in parts if p.startswith("K")][0]
+    K = int(k_part[1:])
 
-# Dataset sizes per client
-DATA_PROVIDERS = {
-    "client1": 3799,
-    "client2": 10570,
-    "client3": 4725,
-    "client4": 2182,
-    "client5": 17938,
-    "client6": 2447,
-    "client7": 1681,
-    "client8": 1729,
-    "client9": 6896,
-    "client10": 14812,
-    "client11": 2778,
-    "client12": 3746,
-    "client13": 4337,
-    "client14": 2146,
-    "client15": 2665,
-    "client16": 1711,
-    "client17": 2094,
-    "client18": 3188,
-    "client19": 2265,
-    "client20": 8281,
-}
+    # Extract Z, ed, iid from folder name like "Z015_ed1000p0_iid10"
+    config_part = [p for p in parts if p.startswith("Z")][0]
+    z_str, ed_str, iid_str = config_part.split("_")
+
+    Z = int(z_str[1:])
+    ed = float(ed_str[2:].replace("p", "."))
+    iid = int(iid_str[3:])
+
+    # Extract timestamp
+    timestamp_part = [p for p in parts if "-" in p and p[0].isdigit()][-1]
+
+    return {
+        "K": K,
+        "Z": Z,
+        "sigma_ed": ed,
+        "sigma_iid": iid,
+        "timestamp": timestamp_part,
+        "path": str(path),
+    }
 
 
-def extract_meta(file_path):
-    p = Path(file_path)
+def read_bandwidth_files(exp_dir):
+    """Read all bandwidth JSON files in an experiment directory."""
+    bandwidth_data = {}
 
-    size = p.parent.name
-    timestamp = p.parent.parent.name
-    rounds = int(p.parent.parent.parent.name)
-    clients = int(p.parent.parent.parent.parent.name)
+    for file in Path(exp_dir).glob("bandwidth_*.json"):
+        service_name = file.stem.replace("bandwidth_", "")
 
-    experiment = f"C{clients}_R{rounds}_{timestamp}_{size}"
+        with open(file, "r") as f:
+            data = json.load(f)
+            bandwidth_data[service_name] = data
 
-    return clients, rounds, timestamp, experiment
-
-
-def load_csv_flexible(file_path):
-    """
-    Load CSV handling both indexed and non-indexed files.
-    Detects if first column is an unnamed index and handles accordingly.
-    """
-    # First, peek at the file to check structure
-    df_peek = pd.read_csv(file_path, nrows=5)
-
-    # Check if first column looks like an index (unnamed or numeric sequence)
-    first_col = df_peek.columns[0]
-
-    # If first column is 'Unnamed: 0' or empty, it's likely an index column
-    if first_col.startswith("Unnamed") or first_col == "":
-        df = pd.read_csv(file_path, index_col=0)
-    else:
-        # Otherwise, read normally
-        df = pd.read_csv(file_path)
-
-    return df
+    return bandwidth_data
 
 
-print("Loading global stats...")
+def read_csv_file(exp_dir, filename):
+    """Read a CSV file if it exists."""
+    file_path = Path(exp_dir) / filename
 
-global_files = glob(f"{DATA_DIR}/**/global_stats.csv", recursive=True)
-
-global_all = []
-
-for f in global_files:
-    try:
-        df = load_csv_flexible(f)
-
-        clients, rounds, ts, exp = extract_meta(f)
-
-        df["clients"] = clients
-        df["rounds"] = rounds
-        df["timestamp"] = ts
-        df["experiment"] = exp
-
-        global_all.append(df)
-    except Exception as e:
-        print(f"Error loading {f}: {e}")
-
-global_df = pd.concat(global_all, ignore_index=True)
-
-print("Global experiments loaded:", len(global_files))
-
-print("Loading client stats...")
-
-client_files = glob(f"{DATA_DIR}/**/client_stats.csv", recursive=True)
-
-client_all = []
-
-for f in client_files:
-    try:
-        df = load_csv_flexible(f)
-
-        clients, rounds, ts, exp = extract_meta(f)
-
-        df["clients"] = clients
-        df["rounds"] = rounds
-        df["timestamp"] = ts
-        df["experiment"] = exp
-
-        client_all.append(df)
-    except Exception as e:
-        print(f"Error loading {f}: {e}")
-
-client_df = pd.concat(client_all, ignore_index=True)
-
-print("Client experiments loaded:", len(client_files))
-
-print("Loading energy stats...")
-
-energy_files = glob(f"{DATA_DIR}/**/energy_consumption.csv", recursive=True)
-
-energy_all = []
-
-for f in energy_files:
-    try:
-        df = load_csv_flexible(f)
-        # Remove any remaining unnamed columns
-        df = df.loc[:, ~df.columns.str.contains("^Unnamed")]
-
-        clients, rounds, ts, exp = extract_meta(f)
-
-        df["clients"] = clients
-        df["rounds"] = rounds
-        df["timestamp"] = ts
-        df["experiment"] = exp
-
-        energy_all.append(df)
-
-    except Exception as e:
-        print("Skipping:", f, "->", e)
-
-energy_df = pd.concat(energy_all, ignore_index=True)
-
-print("Energy experiments loaded:", len(energy_files))
+    if file_path.exists():
+        return pd.read_csv(file_path)
+    return None
 
 
-# -----------------------------------
-# GLOBAL SUMMARY (final round)
-# -----------------------------------
+def combine_all_experiments(data_root):
+    """Combine all experimental results into structured DataFrames."""
 
-print("Computing global summaries...")
+    all_experiments = []
+    all_client_stats = []
+    all_global_stats = []
+    all_energy_data = []
+    all_bandwidth_data = []
 
-# Check if we have a Round column (might be capitalized differently)
-round_col = None
-for col in global_df.columns:
-    if col.lower() == "round":
-        round_col = col
-        break
+    # Find all experiment directories (those with timestamps)
+    for root, dirs, files in os.walk(data_root):
+        # print("Current directory:", root)
+        # print("Subdirectories:", dirs)
+        # print("Files:", files)
+        # print("----------------")
+        if "exp2" in root:
+            "exp2"
+            continue
+        # Check if this is an experiment directory (contains result files)
+        if any(f.endswith(".csv") or f.endswith(".json") for f in files):
+            exp_dir = Path(root)
+            # Parse experiment parameters
+            exp_params = parse_experiment_path(exp_dir)
+            print(exp_params)
 
-if round_col:
-    final_global = global_df.sort_values(round_col).groupby("experiment").tail(1)
-else:
-    # If no Round column, just take unique experiments
-    print("Warning: No Round column found in global_df")
-    final_global = global_df.drop_duplicates(subset=["experiment"], keep="last")
+            # Read client stats
+            client_stats = read_csv_file(exp_dir, "client_stats.csv")
+            if client_stats is not None:
+                for col in ["K", "Z", "sigma_ed", "sigma_iid", "timestamp"]:
+                    client_stats[col] = exp_params[col]
+                all_client_stats.append(client_stats)
 
-final_global = final_global[
-    [
-        "experiment",
-        "clients",
-        "rounds",
-        "GlobalAccuracy",
-        "TotalTrainingTime",
-        "AggregationTime",
-        "RoundDuration",
-    ]
-]
+            # Read global stats
+            global_stats = read_csv_file(exp_dir, "global_stats.csv")
+            if global_stats is not None:
+                for col in ["K", "Z", "sigma_ed", "sigma_iid", "timestamp"]:
+                    global_stats[col] = exp_params[col]
+                all_global_stats.append(global_stats)
 
-print("Computing client fairness...")
+            # Read energy consumption
+            energy_data = read_csv_file(exp_dir, "energy_consumption.csv")
+            if energy_data is not None:
+                for col in ["K", "Z", "sigma_ed", "sigma_iid", "timestamp"]:
+                    energy_data[col] = exp_params[col]
+                all_energy_data.append(energy_data)
 
-# Check for Round column in client_df
-round_col_client = None
-for col in client_df.columns:
-    if col.lower() == "round":
-        round_col_client = col
-        break
+            # Read bandwidth data
+            bandwidth = read_bandwidth_files(exp_dir)
+            if bandwidth:
+                for service, data in bandwidth.items():
+                    bw_row = {**exp_params, "service": service, "bandwidth_data": data}
+                    all_bandwidth_data.append(bw_row)
 
-if round_col_client:
-    fairness = (
-        client_df.groupby(["experiment", round_col_client])["ClientAccuracy"]
-        .std()
-        .groupby("experiment")
-        .mean()
-        .reset_index(name="avg_client_accuracy_std")
+            # Track experiment
+            all_experiments.append(exp_params)
+
+    # Combine into DataFrames
+    df_experiments = pd.DataFrame(all_experiments)
+    df_client_stats = (
+        pd.concat(all_client_stats, ignore_index=True)
+        if all_client_stats
+        else pd.DataFrame()
     )
-else:
-    print("Warning: No Round column found in client_df")
-    fairness = (
-        client_df.groupby("experiment")["ClientAccuracy"]
-        .std()
-        .reset_index(name="avg_client_accuracy_std")
+    df_global_stats = (
+        pd.concat(all_global_stats, ignore_index=True)
+        if all_global_stats
+        else pd.DataFrame()
+    )
+    df_energy = (
+        pd.concat(all_energy_data, ignore_index=True)
+        if all_energy_data
+        else pd.DataFrame()
+    )
+    df_bandwidth = (
+        pd.DataFrame(all_bandwidth_data) if all_bandwidth_data else pd.DataFrame()
+    )
+    return df_experiments, df_client_stats, df_global_stats, df_energy, df_bandwidth
+
+
+if __name__ == "__main__":
+    """Generate summary statistics across all experiments."""
+    data_root = ("/home/maurits/EnergyEfficient_Scattered-Directive/fabric/data",)
+
+    (
+        df_experiments,
+        df_client_stats,
+        df_global_stats,
+        df_energy_stats,
+        df_bandwidth_stats,
+    ) = combine_all_experiments(
+        "/home/maurits/EnergyEfficient_Scattered-Directive/fabric/data/"
     )
 
+    print(f"Total experiments: {len(df_experiments)}")
+    print("\nExperiments by K (number of clients):")
+    print(df_experiments["K"].value_counts().sort_index())
 
-# -----------------------------------
-# ENERGY SUMMARY
-# -----------------------------------
+    print("\nExperiments by Z (number of partitions):")
+    print(df_experiments["Z"].value_counts().sort_index())
 
-print("Computing energy usage...")
+    print("\nExperiments by sigma_ed:")
+    print(df_experiments["sigma_ed"].value_counts().sort_index())
 
-energy_summary = (
-    energy_df.groupby("experiment")["joules"]
-    .sum()
-    .reset_index(name="total_energy_joules")
-)
+    print("\nExperiments by sigma_iid:")
+    print(df_experiments["sigma_iid"].value_counts().sort_index())
 
+    # Global stats summary
+    if not df_global_stats.empty:
+        print(f"\n{'=' * 60}")
+        print("GLOBAL STATISTICS SUMMARY")
+        print(f"{'=' * 60}\n")
 
-# -----------------------------------
-# MERGE MASTER TABLE
-# -----------------------------------
+        # Group by Z and show mean accuracy
+        if "GlobalAccuracy" in df_global_stats.columns:
+            summary = df_global_stats.groupby("Z")["GlobalAccuracy"].agg(
+                ["mean", "std", "count"]
+            )
+            print("\nAccuracy by Z (number of partitions):")
+            print(summary)
 
-print("Merging experiment summary...")
+        # Training time analysis
+        if "ClientTrainingTime" in df_client_stats.columns:
+            summary = df_client_stats.groupby("Z")["ClientTrainingTime"].agg(
+                ["mean", "std"]
+            )
+            print("\nTraining time (ms) by Z:")
+            print(summary)
 
-master = final_global.merge(fairness, on="experiment", how="left")
-master = master.merge(energy_summary, on="experiment", how="left")
-
-# Sort by clients and rounds for easier reading
-master = master.sort_values(["clients", "rounds"]).reset_index(drop=True)
-
-
-# -----------------------------------
-# Save Outputs
-# -----------------------------------
-
-print("Saving CSV outputs...")
-
-global_df.to_csv(f"{OUTPUT_DIR}/all_global_stats.csv", index=False)
-client_df.to_csv(f"{OUTPUT_DIR}/all_client_stats.csv", index=False)
-energy_df.to_csv(f"{OUTPUT_DIR}/all_energy_stats.csv", index=False)
-master.to_csv(f"{OUTPUT_DIR}/experiment_summary.csv", index=False)
-
-print("\n" + "=" * 80)
-print("SUMMARY STATISTICS")
-print("=" * 80)
-print(f"\nTotal experiments: {len(master)}")
-print(f"Client configurations: {sorted(master['clients'].unique())}")
-print(f"Round configurations: {sorted(master['rounds'].unique())}")
-
-print("\n" + "=" * 80)
-print("OUTPUT FILES SAVED")
-print("=" * 80)
-print(f"{OUTPUT_DIR}/all_global_stats.csv - {len(global_df)} rows")
-print(f"{OUTPUT_DIR}/all_client_stats.csv - {len(client_df)} rows")
-print(f"{OUTPUT_DIR}/all_energy_stats.csv - {len(energy_df)} rows")
-print(f"{OUTPUT_DIR}/experiment_summary.csv - {len(master)} experiments")
-
-# Display sample of master table
-print("\n" + "=" * 80)
-print("EXPERIMENT SUMMARY (first 10 rows)")
-print("=" * 80)
-print(master.head(10).to_string(index=False))
+    # 5. Export combined data
+    df_experiments.to_csv("analysis_output/combined_experiments.csv", index=True)
+    if not df_global_stats.empty:
+        df_global_stats.to_csv("analysis_output/combined_global_stats.csv", index=False)
+    if not df_client_stats.empty:
+        df_client_stats.to_csv("analysis_output/combined_client_stats.csv", index=False)
+    if not df_energy_stats.empty:
+        df_energy_stats.to_csv("analysis_output/combined_energy_stats.csv", index=False)
+    if not df_bandwidth_stats.empty:
+        df_bandwidth_stats.to_csv(
+            "analysis_output/combined_bandwidth_stats.csv", index=False
+        )
+    print("\nCombined CSVs saved!")

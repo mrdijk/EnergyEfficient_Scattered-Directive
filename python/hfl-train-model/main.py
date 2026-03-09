@@ -9,6 +9,7 @@ from collections import OrderedDict
 
 import microserviceCommunication_pb2 as msCommTypes
 import numpy as np
+
 # import pandas as pd
 import rabbitMQ_pb2 as rabbitTypes
 import torch
@@ -19,7 +20,7 @@ from dynamos.ms_init import NewConfiguration
 from dynamos.signal_flow import signal_continuation, signal_wait
 from google.protobuf.empty_pb2 import Empty
 from google.protobuf.struct_pb2 import Struct
-from hfl_data import SVHNDataset, get_svhn_transforms
+from hfl_data import SVHN_Dataset, SVHN_Model, get_svhn_transforms
 from opentelemetry.context.context import Context
 
 np.set_printoptions(threshold=sys.maxsize)
@@ -68,7 +69,7 @@ def load_data(file_path: str):
         logger.info("Extraction complete")
 
     transform = get_svhn_transforms(train=True)
-    dataset = SVHNDataset(extract_dir, transform=transform)
+    dataset = SVHN_Dataset(extract_dir, transform=transform)
 
     return dataset
 
@@ -109,22 +110,22 @@ def deserialise_array(string, hook=None):
     return dataArray
 
 
-class SVHN_Model(nn.Module):
-    def __init__(self):
-        super(SVHN_Model, self).__init__()
-        self.fc3 = nn.Linear(3072, 512)  # 32x32x3
-        self.fc5 = nn.Linear(512, 10)
-        self.size = float(6.1)  # Mb 
+# class SVHN_Model(nn.Module):
+#     def __init__(self):
+#         super(SVHN_Model, self).__init__()
+#         self.fc3 = nn.Linear(3072, 512)  # 32x32x3
+#         self.fc5 = nn.Linear(512, 10)
+#         self.size = float(6.1)  # Mb
 
-    def forward(self, xb):
-        out = xb.view(-1, 3072)
-        out = self.fc3(out)
-        out = F.relu(out)
-        out = self.fc5(out)
-        return F.log_softmax(out, dim=1)
+#     def forward(self, xb):
+#         out = xb.view(-1, 3072)
+#         out = self.fc3(out)
+#         out = F.relu(out)
+#         out = self.fc5(out)
+#         return F.log_softmax(out, dim=1)
 
-    def get_size(self):
-        return self.size
+#     def get_size(self):
+#         return self.size
 
 
 class HFLServer:
@@ -143,6 +144,7 @@ class HFLServer:
         row_ids: list[int] = [],
         zipf_rank: int = 0,
         row_count: int = 0,
+        iid: int = 10,
         learning_rate: float = 0.1,
         batch_size: int = 128,
         model_state=None,
@@ -160,13 +162,15 @@ class HFLServer:
         """
         transform = get_svhn_transforms()
 
-        self.data = SVHNDataset(file_path, transform=transform, row_ids=row_ids)
+        self.data = SVHN_Dataset(
+            file_path, transform=transform, row_ids=row_ids, num_classes=iid
+        )
         self.rank = zipf_rank
         self.row_count = row_count
         self.row_ids = row_ids
 
         # Initialize model
-        self.model = SVHN_Model()
+        self.model = SVHN_Model(num_classes=iid)
 
         self.criterion = nn.CrossEntropyLoss()
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
@@ -301,10 +305,10 @@ def handleAggregateRequest(msComm):
         client_updates = []
         for idx, update_struct in enumerate(data.list_value.values):
             update_obj = json.loads(update_struct.string_value)
-            
+
             if len(update_obj["params"]) > 0:
                 logger.debug(f"First param entry: {update_obj['params'][0]}")
-            
+
             # params is a list of [key, serialized_value]
             # Convert to dict of {key: deserialized_value}
             params_dict = {}
@@ -320,49 +324,51 @@ def handleAggregateRequest(msComm):
                     logger.error(f"Error deserializing entry {entry_idx}: {e}")
                     logger.error(f"Entry content: {entry}")
                     raise
-            
+
             upd = {
                 "num_samples": update_obj["num_samples"],
                 "params": params_dict,
             }
             client_updates.append(upd)
-            
+
     except Exception as e:
         logger.error(f"Error deserializing client model updates: {e}")
         import traceback
+
         logger.error(traceback.format_exc())
         return
-    
+
     logger.info("Performing FedAvg aggregation from client updates.")
     hfl_server.aggregate_fit(client_updates)
     agg_duration = (time.perf_counter() - start) * 1000
     accuracy = hfl_server.evaluate()
     logger.info(f"Aggregation duration: {agg_duration:.2f}ms")
-    
+
     # Get global model params
     global_params = hfl_server.get_model_params()
-    
+
     if global_params is None or len(global_params) == 0:
         logger.error("No global parameters returned from get_model_params!")
         return
-    
+
     logger.info(f"Got {len(global_params)} parameters from global model")
-    
+
     # CRITICAL FIX: Serialize to JSON string
     global_params_json = json.dumps(global_params)
     logger.info(f"Serialized global params: {len(global_params_json)} bytes")
-    
+
     # Send as JSON string, not list
     data = Struct()
     data.update({"accuracy": accuracy})
     data.update({"global_params": global_params_json})  # Send as JSON string
     data.update({"t_agg": agg_duration})
-    
+
     ms_config.next_client.ms_comm.send_data(msComm, data, {})
 
 
 def request_handler(msComm: msCommTypes.MicroserviceCommunication, ctx: Context = None):
     global ms_config
+    global hfl_server
 
     logger.info(f"Received original request type: {msComm.request_type}")
     signal_wait(wait_for_setup_event, wait_for_setup_condition)
@@ -392,6 +398,14 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication, ctx: Context 
 
         elif request.type == "hflPingRequest":
             logger.info("Received hflPingRequest.")
+            iid = int(request.data.get("iid", 10).number_value)
+            hfl_server = HFLServer(
+                config.dataset_filepath,
+                row_ids=list(range(26032)),
+                row_count=len(list(range(26032))),
+                zipf_rank=1,
+                iid=iid,
+            )
             ms_config.next_client.ms_comm.send_data(msComm, msComm.data, {})
 
         elif request.type == "hflShutdownRequest":
@@ -406,11 +420,7 @@ def main():
     global ms_config
     global hfl_server
 
-    # data = load_data(config.dataset_filepath)
-    row_ids = list(range(26032))
-    hfl_server = HFLServer(
-        config.dataset_filepath, row_ids=row_ids, row_count=len(row_ids), zipf_rank=1
-    )
+    hfl_server = None
 
     ms_config = NewConfiguration(config.service_name, config.grpc_addr, request_handler)
 

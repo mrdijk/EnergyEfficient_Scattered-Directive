@@ -9,6 +9,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from hfl_data.svhn_dataset import SVHNDataset, get_svhn_transforms
 from numpy.typing import test
+from pandas.core.config_init import data_manager_doc
 from torch.utils.data import DataLoader
 
 # ---------------------- SET SEED FOR REPRODUCIBILITY ----------------------
@@ -366,11 +367,3 @@ for rnd in range(TOTAL_ROUNDS):
             # "num_clients": NOF_CLIENTS
         }
     )
-
-Z_list = [15, 30, 60, 90, 120, 150, 190, 230, 260, 300, 330, 360, 400]
-
-Kappa_list = [5, 10, 20]
-# eed_list = [1.7, 2, 2.3, 1000]
-# iid_list = [7, 5, 3, -1]
-
-print(len(Z_list) * len(Kappa_list) * len(eed_list) * len(iid_list))

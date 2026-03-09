@@ -47,7 +47,10 @@ Symbol  and Definition
 
 > **On the i.i.d. level**: If a setting with independent and identically distributed (i.i.d) data is assumed, then the data samples in each client have the same probability distribution and are mutually independent. In our image-classification problem (see Section 3.6) that would essentially mean that each user holds samples from all classes (unbiased setting). That is represented by the i.i.d. level 𝜎𝑖𝑖𝑑 , being equal to the total number of dataset classes. For some real-world scenarios, noni.i.d. (biased) settings could occur, since each participating client might not be expected to possess a representative subset of all classes in the total training dataset. To study different levels of bias, we restrict the number of dataset classes a client can hold i.e., the value of 𝜎𝑖𝑖𝑑 is smaller compared to the total number of classes. 
 
-Kappa_list=[10]
+We now fix the number of clients/partitions to 𝑧 = 100, or 𝑟𝑑𝑎𝑡𝑎 ≈ 2, an area where CL and FL demonstrate a similar bandwidth consumption profile; moreover, FL exhibits certain gains in terms of the client energy consumption (see Section 4.3). Our goal is to investigate how each ML scheme’s accuracy is affected, when the number of participating clients per round 𝑘 varies. Essentially, a small value of 𝑘 represents a setting where few clients are selected in each round e.g., due to low availability or client scarcity, therefore more communication rounds are required to complete the ML task. Vice versa, an increased 𝑘 suggests a client-rich setting, where more clients participate in each round. We vary 𝑘 from 5 clients per round (which was our initial setting) up to 50, with a step of 5. Each experiment is repeated for 10 different time periods/samples, taken from the LTE mobility dataset, resulting in a total of 100 pairs of CL-FL experiments. The results suggest that scaling the participants has practically no effect on CL’s accuracy (Fig. 13(a)) nor on its completion time (Fig. 13(b)). FL’s accuracy on the other hand is reduced up to 4%, when 𝑘 increases. This result is in line with [5,11], where it is shown that increasing parallelism (i.e., allowing for more per round participants and decreasing the total rounds) degrades the overall accuracy, due to the smaller number of aggregation (FedAvg) steps.
+
+Z_list = [400,360,330,300,260,230,190,150,120,90,60,30,15]
+Kappa_list=[5]
 eed_list=[1.7,2,2.3,1000]
 iid_list=[7,5,3,-1]
 waiting_factor_list=[0]
@@ -58,6 +61,13 @@ learn_rate_list=[0.1]
 tbegin_list=[0*3600]
 agg_list=[1]
 
+for _SUBDATASETS in Z_list:
+                    for _DEVICES_PER_ROUND in Kappa_list:
+                        for _EED in eed_list:
+                            for _IID in iid_list:
+                                for _LOCAL_EPOCHS in local_epoch_list:
+                                    for _BATCH_SIZE in batch_list:
+                                        for _LEARNING_RATE in learn_rate_list:
 _MODEL = 'SVHN'
     
 if self._MODEL == 'SVHN':
@@ -72,8 +82,21 @@ if self._MODEL == 'SVHN':
                 self.learning = SVHN_big_noniid(self._SUBDATASETS,self._BATCH_SIZE,self._LEARNING_RATE,splits=5,sd=self._EED)
             elif self._IID == 7:
                 self.learning = SVHN_big_noniid(self._SUBDATASETS,self._BATCH_SIZE,self._LEARNING_RATE,splits=7,sd=self._EED)
-# AutoFL
 
+## Effect of r_data on CL/FL performance
+| Metric w.r.t. data ratio        | CL       | FL                        | Winner (r_data -> 0) | Winner (r_data -> inf)
+| ------------------------------- | -------- | ------------------------- | -------------------- | ----------------------
+| Achieved accuracy               | Constant | Constant (via tuning)     | None                 |  None
+| Bandwidth consumption           | Constant | Exponential decrease      | CL                   |  FL
+| Traffic loss                    | Constant | Linear decrease           | CL                   | None
+| Total client energy consumption | Constant | Linear increase           | CL                   | CL
+| Per client energy consumption   | Constant | Linear increase           | CL                   | CL
+| Energy loss                     | Constant | Linear increase           | CL                   | CL
+| Core energy consumption         | Constant | Exponential decrease      | CL                   | FL
+| Cloud energy consumption        | Constant | Exponential decrease      | FL                   | FL
+
+
+# AutoFL
 |   | Description                        | Discrete Values                                        |
 | - | ---------------------------------- | ------------------------------------------------------ |
 |   | # of CONV layers                   | Small (<10), medium (<20), large (<30), larger (>=40)  |

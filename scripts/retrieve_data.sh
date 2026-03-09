@@ -23,8 +23,10 @@ final_accuracy=$(echo "$logs" | awk '
     }
   }')
 
-filename="${1:-default}_intermediate_results.txt"
+# filename="${1:-default}_intermediate_results.txt"
 
-mkdir -p results
-# echo "${intermediate_accuracies[@]}" | tr " " "\n" > "results/$filename"
-echo "$intermediate_accuracies" | tr " " "\n" > "results/$filename"
+# mkdir -p results
+echo "${intermediate_accuracies[@]}" 
+# | tr " " "\n" > "results/$filename"
+echo "$intermediate_accuracies" 
+# | tr " " "\n" > "results/$filename"

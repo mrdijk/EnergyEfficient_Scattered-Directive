@@ -1,17 +1,53 @@
+import numpy as np
 import scipy.io as sio
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 from PIL import Image
 from torch.utils.data import Dataset
 from torchvision import transforms
 
 
-class SVHNDataset(Dataset):
-    def __init__(self, file_path, transform=None, row_ids: list[int] = []):
+class SVHN_Model(nn.Module):
+    def __init__(self, num_classes):
+        super(SVHN_Model, self).__init__()
+        self.fc3 = nn.Linear(3072, 512)  # 32x32x3
+        self.fc5 = nn.Linear(512, num_classes)
+        self.num_classes = num_classes
+        # Recalculate model size based on number of classes
+        # fc3: 3072 * 512 + 512 = 1,573,376 parameters
+        # fc5: 512 * num_classes + num_classes parameters
+        total_params = (3072 * 512 + 512) + (512 * num_classes + num_classes)
+        self.size = (total_params * 4) / (
+            1024 * 1024
+        )  # Size in MB (4 bytes per float32)
+
+    def forward(self, xb):
+        out = xb.view(-1, 3072)
+        out = self.fc3(out)
+        out = F.relu(out)
+        out = self.fc5(out)
+        return F.log_softmax(out, dim=1)
+
+    def get_size(self):
+        return self.size
+
+
+class SVHN_Dataset(Dataset):
+    def __init__(
+        self,
+        file_path,
+        transform=None,
+        row_ids: list[int] = [],
+        num_classes=10,
+        random_seed=42,
+    ):
         """
         Args:
             mat_file: Path to extracted images directory
             transform: Optional torchvision transforms
             row_ids: list of indices to load (e.g., [0, 1, 2, ..., 4999])
+            num_classes: Number of classes to use -> i.i.d. level (3, 5, 7, 10)
         """
         # Load .mat file
         data = sio.loadmat(file_path)
@@ -24,7 +60,54 @@ class SVHNDataset(Dataset):
         # Convert label 10 to 0
         self.labels[self.labels == 10] = 0
 
+        # Randomly select classes if num_classes < 10
+        if num_classes < 10:
+            # Set seed for reproducibility
+            np.random.seed(random_seed)
+
+            # Randomly select num_classes from [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+            all_classes = np.arange(10)
+            selected_classes = np.sort(
+                np.random.choice(all_classes, num_classes, replace=False)
+            )
+
+            print(f"Randomly selected {num_classes} classes: {selected_classes}")
+
+            # Create mask for samples with selected classes
+            mask = np.isin(self.labels, selected_classes)
+
+            # Apply mask to images and labels
+            valid_indices = np.where(mask)[0]
+            self.images = self.images[:, :, :, valid_indices]
+            self.labels = self.labels[valid_indices]
+
+            # Create mapping from original labels to new labels [0, num_classes-1]
+            # e.g., if selected_classes = [2, 5, 8], map: 2->0, 5->1, 8->2
+            self.class_mapping = {
+                orig: new for new, orig in enumerate(selected_classes)
+            }
+            self.reverse_mapping = {
+                new: orig for orig, new in self.class_mapping.items()
+            }
+
+            # Remap labels to contiguous range [0, num_classes-1]
+            remapped_labels = np.zeros_like(self.labels)
+            for orig_label, new_label in self.class_mapping.items():
+                remapped_labels[self.labels == orig_label] = new_label
+            self.labels = remapped_labels
+
+            print(f"Label mapping: {self.class_mapping}")
+            print(f"Kept {len(self.labels)} samples after filtering")
+        else:
+            # No remapping needed for 10 classes
+            self.class_mapping = {i: i for i in range(10)}
+            self.reverse_mapping = {i: i for i in range(10)}
+            selected_classes = np.arange(10)
+
         self.transform = transform
+        self.num_classes = num_classes
+        self.selected_classes = selected_classes
+        self.random_seed = random_seed
 
     def __len__(self):
         return self.images.shape[3]
@@ -43,6 +126,27 @@ class SVHNDataset(Dataset):
             image = torch.from_numpy(image).permute(2, 0, 1).float() / 255.0
 
         return image, label
+
+    def get_num_classes(self):
+        return self.num_classes
+
+    def get_selected_classes(self):
+        """Return the original digit labels that were selected."""
+        return self.selected_classes
+
+    def get_class_mapping(self):
+        """Return mapping from original labels to model labels."""
+        return self.class_mapping
+
+    def get_class_distribution(self):
+        """Get the distribution of classes in the dataset."""
+        unique, counts = np.unique(self.labels, return_counts=True)
+        return dict(zip(unique.tolist(), counts.tolist()))
+
+    def get_original_class_distribution(self):
+        """Get distribution using original digit labels."""
+        distribution = self.get_class_distribution()
+        return {self.reverse_mapping[k]: v for k, v in distribution.items()}
 
 
 def get_svhn_transforms():
