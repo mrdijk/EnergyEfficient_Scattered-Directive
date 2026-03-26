@@ -4,6 +4,22 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+# %% Cell
+df_client = pd.read_csv(
+    "/home/maurits/EnergyEfficient_Scattered-Directive/fabric/experiments/analysis_output/combined_client_stats.csv",
+    index_col=[0],
+)
+z_values = [90, 120]
+k_values = [5, 10]
+
+time_stats = (
+    df_client.groupby(["K", "Z"])["ClientTrainingTime"]
+    .agg(["mean", "std"])
+    .reset_index()
+)
+
+time_stats.describe()
+print(14464 / 608)
 # %% Cell 2
 index = pd.MultiIndex.from_tuples(
     [(5, 90), (5, 120), (10, 90), (10, 120)], names=["K", "Z"]
@@ -84,40 +100,129 @@ for ax, metric in zip(axes, metrics):
     ax.legend(fontsize=9)
 
 plt.tight_layout()
-plt.savefig("energy_grouped_bar.png", dpi=150, bbox_inches="tight")
+# plt.savefig("energy_grouped_bar.png", dpi=150, bbox_inches="tight")
 plt.show()
 # %% Cell
 df_energy = pd.read_csv(
     "/home/maurits/EnergyEfficient_Scattered-Directive/fabric/experiments/analysis_output/combined_energy_stats.csv",
     index_col=[0],
 )
-fig, ax = plt.subplots()
-df_energy = df_energy[~df_energy["container_name"].isin(["linkerd-init"])]
-# Create a copy with container_name replaced to "agent" for all client containers
-df_plot = df_energy.copy()
+
+# Filter and rename
+df_plot = df_energy[
+    (df_energy["K"] == 5) & (~df_energy["container_name"].isin(["linkerd-init"]))
+].copy()
 df_plot.loc[
     df_plot["container_name"].str.contains("client|server"), "container_name"
 ] = "agent"
-# Now group and sum
+
+# Average by container avg over Z
 energy_by_container = (
-    df_plot.groupby("container_name")["joules"].sum().sort_values(ascending=False)
+    df_plot.groupby(["container_name", "Z", "timestamp"])["joules"]
+    .sum()
+    .groupby(["container_name", "Z"])
+    .mean()  # avg over repeat runs (not rounds)
+    .groupby("container_name")
+    .mean()  # avg over Z values
+    .sort_values(ascending=False)
+    / 1000  # kJ
 )
 
-(energy_by_container / 1000).plot(
-    kind="barh", ax=ax, color=["#2875E2", "#2875E2", "#2875E2", "#06A77D", "#06A77D"]
-)
-ax.set_title(
-    "Total Energy Consumption by Container Type", fontsize=12, fontweight="bold"
-)
-ax.set_xlabel("Energy (kJ)")
+# Color by category
+INFRA_CONTAINERS = {
+    "orchestrator",
+    "policy-enforcer",
+    "api-gateway",
+    "agent",
+    "linkerd-proxy",
+    "sidecar",
+}
+TRAINING_CONTAINERS = {"hfl-train", "hfl-train-model"}
+
+
+def container_color(name):
+    if name in INFRA_CONTAINERS:
+        return "#2875E2"
+    elif name in TRAINING_CONTAINERS:
+        return "#06A77D"
+    return "#999999"
+
+
+colors = [container_color(c) for c in energy_by_container.index]
+
+# Plot
+fig, ax = plt.subplots(figsize=(8, 5))
+energy_by_container.plot(kind="barh", ax=ax, color=colors)
+
+# ax.set_title(
+#     "Avg Total Energy per Experiment by Container", fontsize=12, fontweight="bold"
+# )
+ax.set_xlabel("kJ")
 ax.set_ylabel("Container")
 ax.grid(True, alpha=0.3, axis="x")
-infra = mpatches.Patch(color="#2875E2", label="DYNAMOS")
-train = mpatches.Patch(color="#06A77D", label="training")
-ax.legend(handles=[infra, train])
+ax.spines["top"].set_visible(False)
+ax.spines["right"].set_visible(False)
+
+infra_patch = mpatches.Patch(color="#2875E2", label="Infrastructure")
+train_patch = mpatches.Patch(color="#06A77D", label="Training")
+ax.legend(handles=[infra_patch, train_patch])
+
 plt.tight_layout()
-# plt.show()
-plt.savefig("analysis_output/plots/analysis_energy.png", dpi=300, bbox_inches="tight")
+plt.savefig("analysis_output/energy_by_container.png", dpi=300, bbox_inches="tight")
+plt.show()
+# %%Cell
+df_energy = pd.read_csv(
+    "/home/maurits/EnergyEfficient_Scattered-Directive/fabric/experiments/analysis_output/combined_energy_stats.csv",
+    index_col=[0],
+)
+
+# Filter and rename
+df_plot = df_energy[
+    (df_energy["K"] == 5) & (~df_energy["container_name"].isin(["linkerd-init"]))
+].copy()
+
+df_plot.loc[
+    df_plot["container_name"].isin(
+        ["client1", "client5", "client9", "client13", "client17"]
+    ),
+    "container_name",
+] = "active_agent"
+
+df_plot.loc[
+    ~df_plot["container_name"].isin(
+        [
+            "client1",
+            "client5",
+            "client9",
+            "client13",
+            "client17",
+            "server",
+            "sidecar",
+            "linkerd-proxy",
+            "hfl-train",
+            "hfl-train-model",
+            "api-gateway",
+            "orchestrator",
+            "policy-enforcer",
+            "active_agent",
+        ]
+    ),
+    "container_name",
+] = "non_active_agent"
+
+print("total joules: ", df_plot.groupby(["container_name"])["joules"].sum() / 1000)
+print("instances: ", df_plot.groupby(["container_name"])["joules"].count())
+print(
+    "per instance: ",
+    (
+        df_plot.groupby(["container_name"])["joules"].sum()
+        / df_plot.groupby(["container_name"])["joules"].count()
+    )
+    / 1000,
+)
+print(
+    df_plot.groupby(["container_name"])["joules"].sum() / df_plot["joules"].sum() * 100
+)
 
 # %% Cell
 df_client = pd.read_csv(
@@ -168,9 +273,9 @@ if not df_client.empty:
     ax.set_ylabel("Training Time (ms)")
     ax.legend()
     ax.grid(True, alpha=0.3, axis="y")
-    plt.savefig(
-        "analysis_output/plots/training_time_by_KZ.png", dpi=300, bbox_inches="tight"
-    )
+    # plt.savefig(
+    #     "analysis_output/plots/training_time_by_KZ.png", dpi=300, bbox_inches="tight"
+    # )
 # %% Cell
 df_energy = pd.read_csv(
     "/home/maurits/EnergyEfficient_Scattered-Directive/fabric/experiments/analysis_output/combined_energy_stats.csv"
@@ -220,7 +325,7 @@ container_colors = {
     "hfl-train-model": "#06A77D",
     "api-gateway": "#E63946",
     "orchestrator": "#E63946",
-    "policy-enforcer": "#FB5607",
+    "policy-enforcer": "#E63946",
 }
 
 colors = [container_colors.get(cont, "#6C757D") for cont in pivot.columns]

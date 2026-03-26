@@ -197,7 +197,7 @@ plot_metric(
 # ax5.spines["right"].set_visible(False)
 
 plt.savefig(
-    "analysis_output/energy_comparison_avg_z.png",
+    "/analysis_output/plots/per_client_overhead.png",
     dpi=300,
     bbox_inches="tight",
     facecolor="white",

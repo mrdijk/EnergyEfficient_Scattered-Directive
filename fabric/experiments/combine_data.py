@@ -137,7 +137,7 @@ def combine_all_experiments(data_root):
 
 if __name__ == "__main__":
     """Generate summary statistics across all experiments."""
-    data_root = ("/home/maurits/EnergyEfficient_Scattered-Directive/fabric/data",)
+    data_root = ("/home/maurits/EnergyEfficient_Scattered-Directive/fabric/data/exp3",)
 
     (
         df_experiments,
@@ -146,7 +146,7 @@ if __name__ == "__main__":
         df_energy_stats,
         df_bandwidth_stats,
     ) = combine_all_experiments(
-        "/home/maurits/EnergyEfficient_Scattered-Directive/fabric/data/"
+        "/home/maurits/EnergyEfficient_Scattered-Directive/fabric/data/exp3"
     )
 
     print(f"Total experiments: {len(df_experiments)}")
@@ -185,13 +185,19 @@ if __name__ == "__main__":
             print(summary)
 
     # 5. Export combined data
-    df_experiments.to_csv("analysis_output/combined_experiments.csv", index=True)
+    df_experiments.to_csv("analysis_output/exp3/combined_experiments.csv", index=True)
     if not df_global_stats.empty:
-        df_global_stats.to_csv("analysis_output/combined_global_stats.csv", index=False)
+        df_global_stats.to_csv(
+            "analysis_output/exp3/combined_global_stats.csv", index=False
+        )
     if not df_client_stats.empty:
-        df_client_stats.to_csv("analysis_output/combined_client_stats.csv", index=False)
+        df_client_stats.to_csv(
+            "analysis_output/exp3/combined_client_stats.csv", index=False
+        )
     if not df_energy_stats.empty:
-        df_energy_stats.to_csv("analysis_output/combined_energy_stats.csv", index=False)
+        df_energy_stats.to_csv(
+            "analysis_output/exp3/combined_energy_stats.csv", index=False
+        )
     if not df_bandwidth_stats.empty:
         df_bandwidth_stats.to_csv(
             "analysis_output/combined_bandwidth_stats.csv", index=False
