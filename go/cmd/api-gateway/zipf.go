@@ -1,10 +1,8 @@
 package main
 
 import (
-	"fmt"
 	"math"
 	"math/rand"
-	"strings"
 )
 
 // Configuration with N partitions
@@ -115,51 +113,7 @@ func (zpb *ZipfPartitionBuilder) AssignRowsToPartitions(config *PartitionConfigu
 	}
 }
 
-// PrintConfigurationSummary prints a summary of the configuration
-func (zpb *ZipfPartitionBuilder) PrintConfigurationSummary(config *PartitionConfiguration) {
-	fmt.Printf("\n%-10s %-12s %-12s %-10s\n", "Partition", "Rows", "Probability", "Percentage")
-	fmt.Println(strings.Repeat("-", 50))
-
-	displayCount := min(config.NumPartitions, 10)
-
-	for i := range displayCount {
-		p := config.Partitions[i]
-		fmt.Printf("%-10d %-12d %-12.6f %-10.2f%%\n",
-			p.Rank, p.RowCount, p.Probability, p.Percentage)
-	}
-
-	if config.NumPartitions > displayCount {
-		fmt.Printf("... (%d more partitions)\n", config.NumPartitions-displayCount)
-
-		// Show last 3
-		fmt.Println()
-		for i := config.NumPartitions - 3; i < config.NumPartitions; i++ {
-			p := config.Partitions[i]
-			fmt.Printf("%-10d %-12d %-12.6f %-10.2f%%\n",
-				p.Rank, p.RowCount, p.Probability, p.Percentage)
-		}
-	}
-
-	// Calculate concentration metrics
-	top3 := 0
-	top10 := 0
-	for i := 0; i < config.NumPartitions; i++ {
-		if i < 3 {
-			top3 += config.Partitions[i].RowCount
-		}
-		if i < 10 {
-			top10 += config.Partitions[i].RowCount
-		}
-	}
-
-	fmt.Printf("\nData Concentration:\n")
-	fmt.Printf("   Top 3 partitions:  %.2f%% of data\n", float64(top3)/float64(config.TotalRows)*100)
-	if config.NumPartitions >= 10 {
-		fmt.Printf("   Top 10 partitions: %.2f%% of data\n", float64(top10)/float64(config.TotalRows)*100)
-	}
-}
-
-func makePartitionConfiguration(nrPartitions int, totalRows int, sigma float64, seed int64) *PartitionConfiguration {
+func makePartitionConfiguration(nrPartitions int, totalRows int, sigma_ed float64, seed int64) *PartitionConfiguration {
 	// Create builder
 	builder := NewZipfPartitionBuilder(seed)
 
@@ -170,7 +124,7 @@ func makePartitionConfiguration(nrPartitions int, totalRows int, sigma float64, 
 	// σ = 2.0 → s = 0.500
 	// σ = 2.3 → s = 0.435
 	// σ = 1000 → s = 0.001
-	zipfExponent := 1 / sigma
+	zipfExponent := 1 / sigma_ed
 	config := builder.BuildConfiguration(nrPartitions, totalRows, zipfExponent)
 	// And assign row IDs
 	builder.AssignRowsToPartitions(config)

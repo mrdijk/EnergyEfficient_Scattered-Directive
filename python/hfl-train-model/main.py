@@ -170,7 +170,7 @@ class HFLServer:
         self.row_ids = row_ids
 
         # Initialize model
-        self.model = SVHN_Model(num_classes=iid)
+        self.model = SVHN_Model()
 
         self.criterion = nn.CrossEntropyLoss()
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
@@ -398,14 +398,6 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication, ctx: Context 
 
         elif request.type == "hflPingRequest":
             logger.info("Received hflPingRequest.")
-            iid = int(request.data.get("iid", 10).number_value)
-            hfl_server = HFLServer(
-                config.dataset_filepath,
-                row_ids=list(range(26032)),
-                row_count=len(list(range(26032))),
-                zipf_rank=1,
-                iid=iid,
-            )
             ms_config.next_client.ms_comm.send_data(msComm, msComm.data, {})
 
         elif request.type == "hflShutdownRequest":
@@ -420,7 +412,12 @@ def main():
     global ms_config
     global hfl_server
 
-    hfl_server = None
+    hfl_server = HFLServer(
+        config.dataset_filepath,
+        row_ids=list(range(26032)),
+        row_count=len(list(range(26032))),
+        zipf_rank=1,
+    )
 
     ms_config = NewConfiguration(config.service_name, config.grpc_addr, request_handler)
 

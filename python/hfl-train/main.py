@@ -3,6 +3,7 @@ import base64
 # import gzip
 import json
 import os
+import re
 import sys
 import tarfile
 import threading
@@ -126,6 +127,7 @@ class HFLClient:
         iid: int = 10,
         batch_size: int = 128,
         model_state=None,
+        client_id: int = 0,
     ):
         """
         Args:
@@ -141,14 +143,18 @@ class HFLClient:
         transform = get_svhn_transforms()
 
         self.data = SVHN_Dataset(
-            file_path, transform=transform, row_ids=row_ids, num_classes=iid
+            file_path,
+            transform=transform,
+            row_ids=row_ids,
+            num_classes=iid,
+            random_seed=client_id,
         )
         self.rank = zipf_rank
         self.row_count = row_count
         self.row_ids = row_ids
 
         # Initialize model
-        self.model = SVHN_Model(num_classes=iid)
+        self.model = SVHN_Model()
 
         if model_state is not None:
             self.model.load_state_dict(model_state)
@@ -318,6 +324,7 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication, ctx: Context 
                         logger.info(
                             f"Initializing HFL client with partition {zipf_rank}"
                         )
+                        client_id = int(re.search(r"\d+", DATA_STEWARD_NAME).group())
                         # Initialize or reinitialize client with partition
                         hfl_client = HFLClient(
                             file_path=config.dataset_filepath,
@@ -326,9 +333,19 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication, ctx: Context 
                             row_ids=row_ids,
                             iid=iid,
                             learning_rate=learning_rate,
+                            client_id=client_id,
                         )
                         logger.info(
                             f"Client initialized successfully with {hfl_client.row_count} samples"
+                        )
+                        logger.info(
+                            f"Selected classes: {hfl_client.data.get_selected_classes()}"
+                        )
+                        logger.info(
+                            f"Class mapping: {hfl_client.data.get_class_mapping()}"
+                        )
+                        logger.info(
+                            f"Class distribution: {hfl_client.data.get_class_distribution()}"
                         )
                     except Exception as e:
                         logger.error(f"Error initializing HFL client: {e}")

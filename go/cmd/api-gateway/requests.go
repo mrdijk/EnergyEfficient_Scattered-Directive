@@ -495,7 +495,7 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 	var nrPartitions int = 20
 	var totalRows int = 531130
 	// iid represents the number of classes present in the client datasets
-	var sigma_iid int = 0
+	var sigma_iid float64 = 0
 	// ed represents the distribution of dataset sizes
 	// Large sigma represent a balanced distribution as sigma aproaches 1 the distribution becomes more skewed
 	var sigma_ed float64 = 0
@@ -520,7 +520,7 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 			nrPartitions = int(val)
 		}
 		if val, ok := data["iid"].(float64); ok {
-			sigma_iid = int(val)
+			sigma_iid = val
 		}
 		if val, ok := data["ed"].(float64); ok {
 			sigma_ed = val
@@ -546,8 +546,12 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 	}
 
 	// Select partitions for clients
-	numClients := len(clients)
-	selectedPartitions := selectRandomPartitions(partitionConfig.Partitions, numClients)
+	// numClients := len(clients)
+	// selectedPartitions := selectRandomPartitions(partitionConfig.Partitions, numClients)
+	selectedPartitions := make([]Partition, len(clients))
+	for i, _ := range selectedPartitions {
+		selectedPartitions[i] = partitionConfig.Partitions[i*5]
+	}
 
 	// logger.Sugar().Infof("Selected %d partitions for %d clients", len(selectedPartitions), numClients)
 	// logger.Sugar().Info("Sending ping to start pods...")
