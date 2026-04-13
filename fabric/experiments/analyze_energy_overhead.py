@@ -1,326 +1,166 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import seaborn as sns
 
-# df = pd.DataFrame(data)
+# Set style
+sns.set_style("whitegrid")
+sns.set_palette("deep")
+
+# Load data
 df = pd.read_csv(
-    "/home/maurits/EnergyEfficient_Scattered-Directive/fabric/experiments/analysis_output/combined_energy_stats.csv",
+    "/home/maurits/EnergyEfficient_Scattered-Directive/fabric/experiments/analysis_output/exp1/combined_energy_stats.csv",
     index_col=[0],
 )
-# Exclude Z=330 if it's an anomaly
-df = df[df["Z"] != 330]
-# z_values = [z for z in z_values if z != 330]
-#
-df_renamed = df[df["K"] == 5].copy()
-df_renamed[~df_renamed["container_name"].isin(["linkerd-init"])]
-df_renamed[~df_renamed["container_name"].isin(["linkerd-proxy"])]
+df = df[df["K"] == 5]
+active_clients = ["client1", "client5", "client9", "client13", "client17"]
+entities = active_clients + ["server"]
+orch_containers = ["orchestrator", "policy-enforcer", "api-gateway"]
+infra_base = ["sidecar", "linkerd-proxy", "linkerd-init"]
 
-df_renamed["container_name"] = df_renamed["container_name"].str.replace(
-    r"^(client.*|server)$", "agent", regex=True
-)
-INFRA_CONTAINERS = {
-    "orchestrator",
-    "policy-enforcer",
-    "api-gateway",
-    "agent",
-    # "linkerd-proxy",
-    "sidecar",
-}
-TRAINING_CONTAINERS = {"hfl-train", "hfl-train-model"}
+results = []
 
+# Process Clients and Server
+for entity in entities:
+    entity_df = df[df["namespace"] == entity]
 
-def categorize(name):
-    if name in INFRA_CONTAINERS:
-        return "Infrastructure_J"
-    elif name in TRAINING_CONTAINERS:
-        return "Training_J"
+    if entity == "server":
+        train_container = "hfl-train-model"
     else:
-        return "other"
+        train_container = "hfl-train"
 
-
-df_renamed["category"] = df_renamed["container_name"].apply(categorize)
-config_cols = ["K", "Z"]
-
-df_per_round = (
-    df_renamed[df_renamed["category"] != "other"]
-    .groupby(config_cols + ["timestamp", "category"])["joules"]
-    .sum()
-    .reset_index()
-)
-
-df = (
-    df_per_round.groupby(config_cols + ["category"])["joules"]
-    .mean()  # ← average over rounds/timestamps
-    .unstack("category")
-    .reset_index()
-)
-
-df["Total_J"] = df["Infrastructure_J"] + df["Training_J"]
-
-df["Fixed_pct"] = (df["Infrastructure_J"] / df["Total_J"]) * 100
-df["Variable_pct"] = (df["Training_J"] / df["Total_J"]) * 100
-
-# Calculate samples per round
-TOTAL_SAMPLES = 531130
-df["Fixed_infrastructure_kJ"] = df["Infrastructure_J"] / 1000
-df["Variable_training_kJ"] = df["Training_J"] / 1000
-df["Total_kJ"] = df["Total_J"] / 1000
-
-df["Samples_per_partition"] = TOTAL_SAMPLES / df["Z"]
-df["Samples_per_round"] = df["Samples_per_partition"] * df["K"]
-
-# Energy per sample
-df["Energy_per_sample_J"] = (df["Total_kJ"] * 1000) / df["Samples_per_round"]
-df["Fixed_per_sample_J"] = (df["Fixed_infrastructure_kJ"] * 1000) / df[
-    "Samples_per_round"
-]
-df["Variable_per_sample_J"] = (df["Variable_training_kJ"] * 1000) / df[
-    "Samples_per_round"
-]
-
-df["Energy_per_Client"] = (df["Total_kJ"] * 1000) / df["K"]
-df["Fixed_energy_per_Client"] = (df["Fixed_infrastructure_kJ"] * 1000) / df["K"]
-df["Var_Energy_per_Client"] = (df["Variable_training_kJ"] * 1000) / df["K"]
-
-print("=" * 100)
-print("CORRECTED OVERHEAD ANALYSIS")
-print("=" * 100)
-print("\nCategorization:")
-print("  FIXED (Infrastructure):")
-print("    - sidecar, linkerd-proxy (service mesh)")
-print("    - api-gateway, orchestrator (coordination)")
-print("    - client1-20 containers (infrastructure for clients)")
-print("  VARIABLE (Training):")
-print("    - hfl-train (client training)")
-print("    - hfl-train-model (server/aggregation)")
-print("=" * 100)
-
-print(
-    f"\n{'Z':<6} {'K':<4} {'Samples/Round':<15} {'Infrastructure (kJ/round)':<26} {'Training (kJ/round)':<20} "
-    f"{'Total (kJ/round)':<18} {'Infra %':<10}"
-)
-print("-" * 100)
-
-for idx, row in df.iterrows():
-    print(
-        f"{int(row['Z']):<6} {row['Samples_per_round']:<15,.0f} "
-        f"{row['Fixed_infrastructure_kJ']:<20.2f} {row['Variable_training_kJ']:<15.2f} "
-        f"{row['Total_kJ']:<12.2f} {row['Fixed_pct']:<10.1f}%"
+    training_energy_kj = (
+        entity_df[entity_df["container_name"] == train_container]["joules"].sum()
+        / 1000.0
     )
 
-# fig, ax = plt.subplots(1, 1)
+    # Infra components in this namespace
+    agent_energy_kj = (
+        entity_df[entity_df["container_name"] == entity]["joules"].sum() / 1000.0
+    )
+    sidecar_energy_kj = (
+        entity_df[entity_df["container_name"] == "sidecar"]["joules"].sum() / 1000.0
+    )
+    linkerd_energy_kj = (
+        entity_df[entity_df["container_name"].isin(["linkerd-proxy", "linkerd-init"])][
+            "joules"
+        ].sum()
+        / 1000.0
+    )
 
-# # Plot 1: Stacked bar showing infrastructure vs training
-# plot = "per_sample_overhead.png"
-# # ax = axes[0, 0]
-# ax.plot(
-#     df["Z"],
-#     df["Fixed_per_sample_J"],
-#     "o-",
-#     linewidth=2.5,
-#     markersize=9,
-#     label="DYNAMOS overhead/sample",
-#     color="#2875E2",
-#     markeredgewidth=1.5,
-#     markeredgecolor="white",
-# )
-# ax.plot(
-#     df["Z"],
-#     df["Variable_per_sample_J"],
-#     "s-",
-#     linewidth=2.5,
-#     markersize=9,
-#     label="Training cost/sample",
-#     color="#06A77D",
-#     markeredgewidth=1.5,
-#     markeredgecolor="white",
-# )
-# ax.plot(
-#     df["Z"],
-#     df["Energy_per_sample_J"],
-#     "^-",
-#     linewidth=3,
-#     markersize=10,
-#     label="Total energy/sample",
-#     color="#E63946",
-#     markeredgewidth=1.5,
-#     markeredgecolor="white",
-#     alpha=0.7,
-# )
+    infra_total_kj = agent_energy_kj + sidecar_energy_kj + linkerd_energy_kj
+    infra_no_linkerd_kj = agent_energy_kj + sidecar_energy_kj
 
-# ax.set_xlabel("Number of Partitions (Z)", fontsize=12, fontweight="bold")
-# ax.set_ylabel("Energy Consumption (kJ)", fontsize=12, fontweight="bold")
-# # ax.set_title(
-# #     "Energy overhead per Sample",
-# #     fontsize=13,
-# #     fontweight="bold",
-# # )
-# ax.legend(fontsize=10, loc="upper right")
-# ax.grid(True, alpha=0.3)
-# ax.spines["top"].set_visible(False)
-# ax.spines["right"].set_visible(False)
-# plt.tight_layout()
-# plt.savefig(f"analysis_output/{plot}", dpi=300, bbox_inches="tight")
-# print(f"\nSaved: {plot}")
+    results.append(
+        {
+            "Entity": entity,
+            "Training Cost (kJ)": training_energy_kj,
+            "Total Infra Overhead (kJ)": infra_total_kj,
+            "Infra Without Linkerd (kJ)": infra_no_linkerd_kj,
+        }
+    )
 
-# # Plot 2: Energy per sample breakdown
-# fig, ax = plt.subplots(1, 1)
-# plot = "per_client_overhead.png"
-# # ax = axes[0, 0]
-# ax.plot(
-#     df["Z"],
-#     df["Fixed_energy_per_Client"],
-#     "o-",
-#     linewidth=2.5,
-#     markersize=9,
-#     label="DYNAMOS overhead/client",
-#     color="#2875E2",
-#     markeredgewidth=1.5,
-#     markeredgecolor="white",
-# )
-# ax.plot(
-#     df["Z"],
-#     df["Var_Energy_per_Client"],
-#     "s-",
-#     linewidth=2.5,
-#     markersize=9,
-#     label="Training cost/client",
-#     color="#06A77D",
-#     markeredgewidth=1.5,
-#     markeredgecolor="white",
-# )
-# ax.plot(
-#     df["Z"],
-#     df["Energy_per_Client"],
-#     "^-",
-#     linewidth=3,
-#     markersize=10,
-#     label="Total energy/client",
-#     color="#E63946",
-#     markeredgewidth=1.5,
-#     markeredgecolor="white",
-#     alpha=0.7,
-# )
+# Process Orchestration (aggregated)
+# Orchestration containers might be in different namespaces (like 'orchestrator', 'api-gateway', etc.)
+# We treat the trio as one 'Orchestration' entity.
+orch_mask = df["container_name"].isin(orch_containers)
+orch_pods = df[orch_mask]["pod_name"].unique()
+orch_df = df[df["pod_name"].isin(orch_pods)]
 
-# ax.set_xlabel("Number of Partitions (Z)", fontsize=12, fontweight="bold")
-# ax.set_ylabel("Energy Consumption (kJ)", fontsize=12, fontweight="bold")
-# # ax.set_title(
-# #     "Energy overhead per Client",
-# #     fontsize=13,
-# #     fontweight="bold",
-# # )
-# ax.legend(fontsize=10, loc="upper right")
-# ax.grid(True, alpha=0.3)
-# ax.spines["top"].set_visible(False)
-# ax.spines["right"].set_visible(False)
-# plt.savefig(f"analysis_output/{plot}", dpi=300, bbox_inches="tight")
-# print(f"\nSaved: {plot}")
-
-# Plot 3: Infrastructure percentage
-fig, axes = plt.subplots(1, 2, figsize=(12, 6))
-ax = axes[0]
-
-ax.plot(
-    df["Z"],
-    df["Fixed_infrastructure_kJ"] / df["K"],
-    "o-",
-    linewidth=2.5,
-    markersize=9,
-    label="Infrastructure energy",
-    color="#2875E2",
-    markeredgewidth=1.5,
-    markeredgecolor="white",
+orch_agent_energy_kj = (
+    orch_df[orch_df["container_name"].isin(orch_containers)]["joules"].sum() / 1000.0
+)
+orch_sidecar_energy_kj = (
+    orch_df[orch_df["container_name"] == "sidecar"]["joules"].sum() / 1000.0
+)
+orch_linkerd_energy_kj = (
+    orch_df[orch_df["container_name"].isin(["linkerd-proxy", "linkerd-init"])][
+        "joules"
+    ].sum()
+    / 1000.0
 )
 
-ax2 = ax.twinx()
-ax2.plot(
-    df["Z"],
-    df["Samples_per_round"] / df["K"],
-    "s--",
-    linewidth=2,
-    markersize=8,
-    label="Samples",
-    color="#F77F00",
-    alpha=0.7,
-    markeredgewidth=1.5,
-    markeredgecolor="white",
+orch_total_infra_kj = (
+    orch_agent_energy_kj + orch_sidecar_energy_kj + orch_linkerd_energy_kj
+)
+orch_no_linkerd_kj = orch_agent_energy_kj + orch_sidecar_energy_kj
+
+results.append(
+    {
+        "Entity": "Orchestration",
+        "Training Cost (kJ)": 0.0,
+        "Total Infra Overhead (kJ)": orch_total_infra_kj,
+        "Infra Without Linkerd (kJ)": orch_no_linkerd_kj,
+    }
 )
 
-ax.set_xlabel("Number of Partitions (Z)", fontsize=12, fontweight="bold")
-ax.set_ylabel(
-    "Infrastructure Energy per Client (kJ)",
-    fontsize=12,
-    fontweight="bold",
-    color="#2875E2",
-)
-ax2.set_ylabel("Samples per Client", fontsize=12, fontweight="bold", color="#F77F00")
-ax.set_title(
-    "Infrastructure Cost",
-    fontsize=13,
-    fontweight="bold",
-)
-ax.tick_params(axis="y", labelcolor="#06A77D")
-ax2.tick_params(axis="y", labelcolor="#F77F00")
+plot_df = pd.DataFrame(results)
+all_labels = plot_df["Entity"].tolist()
 
-# Combine legends
-lines1, labels1 = ax.get_legend_handles_labels()
-lines2, labels2 = ax2.get_legend_handles_labels()
-ax.legend(lines1 + lines2, labels1 + labels2, loc="best", fontsize=10)
+# Create the plot
+x = np.arange(len(all_labels))
+width = 0.25  # the width of the bars
 
-ax.grid(True, alpha=0.3)
-ax.spines["top"].set_visible(False)
-ax2.spines["top"].set_visible(False)
+fig, ax = plt.subplots(figsize=(14, 8))
 
-# Plot 4: Training energy detail
-ax = axes[1]
+# Define colors
+# colors = ["#1f77b4", "#ff7f0e", "#2ca02c"]
 
-ax.plot(
-    df["Z"],
-    df["Variable_training_kJ"] / df["K"],
-    "o-",
-    linewidth=2.5,
-    markersize=9,
-    label="Training energy",
+rects1 = ax.bar(
+    x - width,
+    plot_df["Training Cost (kJ)"],
+    width,
+    label="Training Cost",
     color="#06A77D",
-    markeredgewidth=1.5,
-    markeredgecolor="white",
+    # edgecolor="black",
+)
+rects2 = ax.bar(
+    x,
+    plot_df["Total Infra Overhead (kJ)"],
+    width,
+    label="Total Infra Overhead",
+    color="#E63946",
+    # edgecolor="black",
+)
+rects3 = ax.bar(
+    x + width,
+    plot_df["Infra Without Linkerd (kJ)"],
+    width,
+    label="Infra Without Linkerd",
+    # color=colors[2],
+    # edgecolor="black",
 )
 
-ax2 = ax.twinx()
-ax2.plot(
-    df["Z"],
-    df["Samples_per_round"] / df["K"],
-    "s--",
-    linewidth=2,
-    markersize=8,
-    label="Samples",
-    color="#F77F00",
-    alpha=0.7,
-    markeredgewidth=1.5,
-    markeredgecolor="white",
-)
+# Add some text for labels, title and custom x-axis tick labels, etc.
+ax.set_ylabel("Energy (kJ)")
+ax.set_title("Energy Breakdown per Client and Server (in kJ)")
+ax.set_xticks(x)
+ax.set_xticklabels(all_labels)
+ax.legend()
+ax.grid(True, alpha=0.3, axis="y")
 
-ax.set_xlabel("Number of Partitions (Z)", fontsize=12, fontweight="bold")
-ax.set_ylabel(
-    "Training Energy per Client (kJ)", fontsize=12, fontweight="bold", color="#06A77D"
-)
-ax2.set_ylabel("Samples per Client", fontsize=12, fontweight="bold", color="#F77F00")
-ax.set_title(
-    "Training Cost",
-    fontsize=13,
-    fontweight="bold",
-)
-ax.tick_params(axis="y", labelcolor="#06A77D")
-ax2.tick_params(axis="y", labelcolor="#F77F00")
 
-# Combine legends
-lines1, labels1 = ax.get_legend_handles_labels()
-lines2, labels2 = ax2.get_legend_handles_labels()
-ax.legend(lines1 + lines2, labels1 + labels2, loc="best", fontsize=10)
+# Function to add labels on top of bars
+def autolabel(rects):
+    for rect in rects:
+        height = rect.get_height()
+        ax.annotate(
+            f"{height:.1f}",
+            xy=(rect.get_x() + rect.get_width() / 2, height),
+            xytext=(0, 3),
+            textcoords="offset points",
+            ha="center",
+            va="bottom",
+            fontsize=9,
+        )
 
-ax.grid(True, alpha=0.3)
-ax.spines["top"].set_visible(False)
-ax2.spines["top"].set_visible(False)
+
+autolabel(rects1)
+autolabel(rects2)
+autolabel(rects3)
 
 plt.tight_layout()
-plt.savefig("analysis_output/overhead_and_samples", dpi=300, bbox_inches="tight")
+plt.savefig("analysis_output/plots/combined_energy_breakdown.png")
+
+# Output a summary table for the user
+print(plot_df.to_string(index=False))

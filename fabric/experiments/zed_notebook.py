@@ -434,6 +434,7 @@ plt.tight_layout()
 # print("\nSaved: energy_stacked_by_z_grouped_by_k.png")
 
 # Print summary statistics
+
 print("\n" + "=" * 80)
 print("SUMMARY STATISTICS")
 print("=" * 80)
@@ -453,3 +454,190 @@ for k in k_values:
         print(f"    {container:<20} {avg_energy:>8.2f} kJ ({pct:>5.1f}%)")
 
 plt.show()
+
+# %% Cell
+
+df_global = pd.read_csv(
+    "/home/maurits/EnergyEfficient_Scattered-Directive/fabric/experiments/analysis_output/exp2/combined_global_stats.csv"
+)
+df_energy = pd.read_csv(
+    "/home/maurits/EnergyEfficient_Scattered-Directive/fabric/experiments/analysis_output/exp2/combined_energy_stats.csv"
+)
+accuracy_comparison = df_global.groupby(["K"])["GlobalAccuracy"].last().reset_index()
+energy_totals = df_energy.groupby(["K"])["joules"].sum().reset_index()
+energy_totals["total_kJ"] = energy_totals["joules"] / 1000
+ROUNDS = 25
+TOTAL_SAMPLES = 531130
+
+
+def categorize_container(container_name):
+    name = str(container_name).lower()
+    if (
+        "sidecar" in name
+        or "linkerd" in name
+        or name.startswith("client")
+        or "server" in name
+    ):
+        return "Infrastructure"
+    elif "policy-enforcer" in name or "api-gateway" in name or "orchestrator" in name:
+        return "Coordination"
+    elif "hfl-train" in name or "hfl-train-model":
+        return "Training"
+    else:
+        return "Other"
+
+
+df_energy["component_type"] = df_energy["container_name"].apply(categorize_container)
+# print(df_energy["container_name"].unique())
+# print(df_energy["component_type"].unique())
+print("\n" + "=" * 80)
+print("CLIENT SCALING ANALYSIS: K=5 vs K=10")
+print("=" * 80)
+
+k5_energy = energy_totals[(energy_totals["K"] == 5)]["total_kJ"].values[0]
+k10_energy = energy_totals[(energy_totals["K"] == 10)]["total_kJ"].values[0]
+k5_acc = accuracy_comparison[(accuracy_comparison["K"] == 5)]["GlobalAccuracy"].values[
+    0
+]
+k10_acc = accuracy_comparison[(accuracy_comparison["K"] == 10)][
+    "GlobalAccuracy"
+].values[0]
+
+energy_totals["samples"] = energy_totals["K"] * (TOTAL_SAMPLES / 105)
+energy_totals["energy_per_sample"] = (energy_totals["total_kJ"] * 1000) / energy_totals[
+    "samples"
+]
+component_energy = (
+    df_energy.groupby(["K", "component_type"])["joules"].sum().reset_index()
+)
+component_energy["kJ"] = component_energy["joules"] / 1000
+
+print("\nTotal Energy:")
+print(f"  K=5:  {k5_energy:,.2f} kJ")
+print(f"  K=10: {k10_energy:,.2f} kJ")
+print(
+    f"  Increase: {k10_energy - k5_energy:+,.2f} kJ ({(k10_energy / k5_energy - 1) * 100:+.1f}%)"
+)
+print(f"  Scaling factor: {k10_energy / k5_energy:.2f}× (linear would be 2.0×)")
+
+print("\nGlobal Accuracy:")
+print(f"  K=5:  {k5_acc:.4f}")
+print(f"  K=10: {k10_acc:.4f}")
+print(f"  Improvement: {k10_acc - k5_acc:+.4f} ({(k10_acc / k5_acc - 1) * 100:+.1f}%)")
+
+k5_j_per_sample = energy_totals[(energy_totals["K"] == 5)]["energy_per_sample"].values[
+    0
+]
+k10_j_per_sample = energy_totals[(energy_totals["K"] == 10)][
+    "energy_per_sample"
+].values[0]
+
+print("\nEnergy per Sample:")
+print(f"  K=5:  {k5_j_per_sample:.4f} J/sample")
+print(f"  K=10: {k10_j_per_sample:.4f} J/sample")
+print(
+    f"  Change: {k10_j_per_sample - k5_j_per_sample:+.4f} J ({(k10_j_per_sample / k5_j_per_sample - 1) * 100:+.1f}%)"
+)
+
+print("\n Absolute Energy Efficiency (kJ per accuracy %):")
+k5_eff = k5_energy / (k5_acc * 100)
+k10_eff = k10_energy / (k10_acc * 100)
+print(f"  K=5:  {k5_eff:.4f} J")
+print(f"  K=10: {k10_eff:.4f} J")
+if k10_eff < k5_eff:
+    print("  → K=10 is MORE energy-efficient per accuracy point!")
+else:
+    print("  → K=5 is MORE energy-efficient per accuracy point!")
+
+print("\n Relative Energy Efficiency (J per accuracy %):")
+k5_eff = k5_j_per_sample / (k5_acc * 100)
+k10_eff = k10_j_per_sample / (k10_acc * 100)
+print(f"  K=5:  {k5_eff:.4f} J")
+print(f"  K=10: {k10_eff:.4f} J")
+if k10_eff < k5_eff:
+    print("  → K=10 is MORE energy-efficient per accuracy point!")
+else:
+    print("  → K=5 is MORE energy-efficient per accuracy point!")
+
+print("\nInfrastructure Overhead:")
+k5_infra = component_energy[
+    (component_energy["K"] == 5)
+    & (component_energy["component_type"] == "Infrastructure")
+]["kJ"].values[0]
+k10_infra = component_energy[
+    (component_energy["K"] == 10)
+    & (component_energy["component_type"] == "Infrastructure")
+]["kJ"].values[0]
+print(f"  K=5:  {k5_infra:.2f} kJ ({k5_infra / k5_energy * 100:.1f}% of total)")
+print(f"  K=10: {k10_infra:.2f} kJ ({k10_infra / k10_energy * 100:.1f}% of total)")
+print(f"  Scaling: {k10_infra / k5_infra:.2f}×")
+
+print("\n Training Overhead:")
+k5_train = component_energy[
+    (component_energy["K"] == 5) & (component_energy["component_type"] == "Training")
+]["kJ"].values[0]
+k10_train = component_energy[
+    (component_energy["K"] == 10) & (component_energy["component_type"] == "Training")
+]["kJ"].values[0]
+print(f"  K=5:  {k5_train:.2f} kJ ({k5_train / k5_energy * 100:.1f}% of total)")
+print(f"  K=10: {k10_train:.2f} kJ ({k10_train / k10_energy * 100:.1f}% of total)")
+print(f"  Scaling: {k10_train / k5_train:.2f}×")
+print(component_energy)
+print("\nPolicy Overhead:")
+k5_coor = component_energy[
+    (component_energy["K"] == 5)
+    & (component_energy["component_type"] == "Coordination")
+]["kJ"].values[0]
+k10_coor = component_energy[
+    (component_energy["K"] == 10)
+    & (component_energy["component_type"] == "Coordination")
+]["kJ"].values[0]
+
+print(f"  K=5:  {k5_coor:.2f} kJ ({k5_coor / k5_energy * 100:.1f}% of total)")
+print(f"  K=10: {k10_coor:.2f} kJ ({k10_coor / k10_energy * 100:.1f}% of total)")
+print(f"  Scaling: {k10_coor / k5_coor:.2f}×")
+
+
+# %% Cell
+df = pd.read_csv(
+    "/home/maurits/EnergyEfficient_Scattered-Directive/fabric/experiments/zipf_distribution_100.csv"
+)
+total_rows = 531130
+num_partitions = 100
+sigma = 1.7
+df["RowCountEven"] = total_rows / num_partitions
+# Plotting
+# Create boolean mask for highlighted ranks
+highlight_ranks = [1, 5, 10, 15, 20]
+mask = df["Rank"].isin(highlight_ranks)
+
+# Create color arrays
+color_even = np.where(mask, "red", "coral")
+color_skewed = np.where(mask, "red", "steelblue")
+
+plt.bar(
+    df["Rank"], df["RowCountEven"], label="sigma=1000", color=color_even, alpha=0.85
+)
+plt.bar(df["Rank"], df["RowCount"], label="sigma=1.7", color=color_skewed, alpha=0.85)
+# plt.title(f"Zipf Distribution")
+plt.xlabel("Partition Rank")
+plt.ylabel("Row Count")
+plt.grid(axis="y", alpha=0.7)
+# plt.legend(["sigma=1000", "sigma=1.7"])
+plt.tight_layout()
+# plt.savefig("analysis_output/plots/zipf_distribution_plot.png")
+
+
+# %% Cell
+df = pd.read_csv(
+    "/home/maurits/EnergyEfficient_Scattered-Directive/fabric/experiments/analysis_output/exp2/combined_energy_stats.csv",
+    index_col=[0],
+)
+active_clients = ["client1", "client5", "client9", "client13", "client17"]
+orch_containers = ["orchestrator", "api-gateway", "policy-enforcer"]
+df = df[df["K"] == 5]
+df = df[df["container_name"] != "linkerd-init"]
+df = df[df["namespace"].isin(active_clients + orch_containers + ["server"])]
+
+test = df.groupby(["namespace", "container_name"])["joules"].sum() / 1000
+print(test)

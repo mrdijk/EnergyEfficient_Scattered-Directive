@@ -13,11 +13,11 @@ MODEL_SIZE_MB = 6.1
 
 ED = [1000, 1.7]
 IID = [10, 6, 3]
+CLIENTS = ["client1", "client5", "client9", "client13", "client17"]
 
 
-def plot_accuracy(df_global, df_client):
-    fig, axes = plt.subplots(1, 1)
-    ax = axes[0]
+def plot_global_accuracy(df_global):
+    fig, ax = plt.subplots(1, 1)
     metrics = df_global.columns.tolist()
     # Compute consistent y-max per metric (max value + 15% headroom)
     y_max = {metric: df_global["GlobalAccuracy"].max() * 1.15 for metric in metrics}
@@ -69,8 +69,67 @@ def plot_accuracy(df_global, df_client):
     ax.grid(True, alpha=0.3, axis="y")
 
     plt.tight_layout()
-    plt.savefig("analysis_output/exp3/data_dist.png", dpi=300, bbox_inches="tight")
-    print("Saved: data_dist.png")
+    plt.savefig("analysis_output/exp3/ED_IID_global.png", dpi=300, bbox_inches="tight")
+    print("Saved: ED_IID_global.png")
+
+
+def plot_client_accuracy(df_client):
+    fig, ax = plt.subplots(1, 1)
+
+    data = df_client.groupby(["ClientID", "sigma_ed", "sigma_iid"]).last().reset_index()
+
+    # Show all configurations for each client
+    x_pos = np.arange(6)  # 6 configurations
+    width = 0.15
+
+    for i, client_id in enumerate(CLIENTS):
+        client_data = data[data["ClientID"] == client_id].sort_values(
+            ["sigma_ed", "sigma_iid"], ascending=False
+        )
+
+        offset = (i - 2) * width
+        bars = ax.bar(
+            x_pos + offset,
+            client_data["ClientAccuracy"].values,
+            width,
+            label=client_id,
+            alpha=0.85,
+            edgecolor="white",
+            linewidth=1,
+        )
+
+    ax.set_ylabel("Client Accuracy", fontsize=11, fontweight="bold")
+    # ax.set_title(
+    #     "All Clients Across All Configurations", fontsize=12, fontweight="bold"
+    # )
+    ax.set_xticks(x_pos)
+    ax.set_xticklabels(
+        [
+            "σ_ed=1.7\nσ_iid=3",
+            "σ_ed=1.7\nσ_iid=6",
+            "σ_ed=1.7\nσ_iid=10",
+            "σ_ed=1000\nσ_iid=3",
+            "σ_ed=1000\nσ_iid=6",
+            "σ_ed=1000\nσ_iid=10",
+        ],
+        fontsize=9,
+    )
+    ax.legend(fontsize=9, ncol=5, loc="upper right")
+    ax.grid(True, alpha=0.3, axis="y")
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+    # Overall title
+    # fig.suptitle(
+    #     "Client Accuracy Analysis: Effect of σ_iid (Classes) and σ_ed (Data Distribution)",
+    #     fontsize=16,
+    #     fontweight="bold",
+    #     y=0.995,
+    # )
+
+    plt.tight_layout()
+    plt.savefig("analysis_output/exp3/ED_IID_clients.png", dpi=300, bbox_inches="tight")
+    print("Saved: ED_IID_clients.png")
 
 
 def main():
@@ -91,7 +150,8 @@ def main():
     ].mean()
     print(client_acc)
 
-    plot_accuracy(df_global, df_client)
+    plot_global_accuracy(df_global)
+    plot_client_accuracy(df_client)
 
 
 if __name__ == "__main__":

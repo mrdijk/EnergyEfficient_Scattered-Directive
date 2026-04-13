@@ -59,11 +59,11 @@ def read_csv_file(exp_dir, filename):
 def combine_all_experiments(data_root):
     """Combine all experimental results into structured DataFrames."""
 
-    all_experiments = []
+    # all_experiments = []
     all_client_stats = []
     all_global_stats = []
     all_energy_data = []
-    all_bandwidth_data = []
+    # all_bandwidth_data = []
 
     # Find all experiment directories (those with timestamps)
     for root, dirs, files in os.walk(data_root):
@@ -71,9 +71,6 @@ def combine_all_experiments(data_root):
         # print("Subdirectories:", dirs)
         # print("Files:", files)
         # print("----------------")
-        if "exp2" in root:
-            "exp2"
-            continue
         # Check if this is an experiment directory (contains result files)
         if any(f.endswith(".csv") or f.endswith(".json") for f in files):
             exp_dir = Path(root)
@@ -85,12 +82,14 @@ def combine_all_experiments(data_root):
             client_stats = read_csv_file(exp_dir, "client_stats.csv")
             if client_stats is not None:
                 for col in ["K", "Z", "sigma_ed", "sigma_iid", "timestamp"]:
+                    # for col in ["K", "timestamp"]:
                     client_stats[col] = exp_params[col]
                 all_client_stats.append(client_stats)
 
             # Read global stats
             global_stats = read_csv_file(exp_dir, "global_stats.csv")
             if global_stats is not None:
+                # for col in ["K", "timestamp"]:
                 for col in ["K", "Z", "sigma_ed", "sigma_iid", "timestamp"]:
                     global_stats[col] = exp_params[col]
                 all_global_stats.append(global_stats)
@@ -98,22 +97,23 @@ def combine_all_experiments(data_root):
             # Read energy consumption
             energy_data = read_csv_file(exp_dir, "energy_consumption.csv")
             if energy_data is not None:
+                # for col in ["K", "timestamp"]:
                 for col in ["K", "Z", "sigma_ed", "sigma_iid", "timestamp"]:
                     energy_data[col] = exp_params[col]
                 all_energy_data.append(energy_data)
 
             # Read bandwidth data
-            bandwidth = read_bandwidth_files(exp_dir)
-            if bandwidth:
-                for service, data in bandwidth.items():
-                    bw_row = {**exp_params, "service": service, "bandwidth_data": data}
-                    all_bandwidth_data.append(bw_row)
+            # bandwidth = read_bandwidth_files(exp_dir)
+            # if bandwidth:
+            #     for service, data in bandwidth.items():
+            #         bw_row = {**exp_params, "service": service, "bandwidth_data": data}
+            #         all_bandwidth_data.append(bw_row)
 
             # Track experiment
-            all_experiments.append(exp_params)
+            # all_experiments.append(exp_params)
 
     # Combine into DataFrames
-    df_experiments = pd.DataFrame(all_experiments)
+    # df_experiments = pd.DataFrame(all_experiments)
     df_client_stats = (
         pd.concat(all_client_stats, ignore_index=True)
         if all_client_stats
@@ -129,38 +129,34 @@ def combine_all_experiments(data_root):
         if all_energy_data
         else pd.DataFrame()
     )
-    df_bandwidth = (
-        pd.DataFrame(all_bandwidth_data) if all_bandwidth_data else pd.DataFrame()
-    )
-    return df_experiments, df_client_stats, df_global_stats, df_energy, df_bandwidth
+    # df_bandwidth = (
+    #     pd.DataFrame(all_bandwidth_data) if all_bandwidth_data else pd.DataFrame()
+    # )
+    return df_client_stats, df_global_stats, df_energy
 
 
 if __name__ == "__main__":
     """Generate summary statistics across all experiments."""
-    data_root = ("/home/maurits/EnergyEfficient_Scattered-Directive/fabric/data/exp3",)
+    data_root = "/home/maurits/EnergyEfficient_Scattered-Directive/fabric/data/exp3"
 
     (
-        df_experiments,
         df_client_stats,
         df_global_stats,
         df_energy_stats,
-        df_bandwidth_stats,
-    ) = combine_all_experiments(
-        "/home/maurits/EnergyEfficient_Scattered-Directive/fabric/data/exp3"
-    )
+    ) = combine_all_experiments(data_root)
 
-    print(f"Total experiments: {len(df_experiments)}")
-    print("\nExperiments by K (number of clients):")
-    print(df_experiments["K"].value_counts().sort_index())
+    # print(f"Total experiments: {len(df_experiments)}")
+    # print("\nExperiments by K (number of clients):")
+    # print(df_experiments["K"].value_counts().sort_index())
 
-    print("\nExperiments by Z (number of partitions):")
-    print(df_experiments["Z"].value_counts().sort_index())
+    # print("\nExperiments by Z (number of partitions):")
+    # print(df_experiments["Z"].value_counts().sort_index())
 
-    print("\nExperiments by sigma_ed:")
-    print(df_experiments["sigma_ed"].value_counts().sort_index())
+    # print("\nExperiments by sigma_ed:")
+    # print(df_experiments["sigma_ed"].value_counts().sort_index())
 
-    print("\nExperiments by sigma_iid:")
-    print(df_experiments["sigma_iid"].value_counts().sort_index())
+    # print("\nExperiments by sigma_iid:")
+    # print(df_experiments["sigma_iid"].value_counts().sort_index())
 
     # Global stats summary
     if not df_global_stats.empty:
@@ -170,22 +166,18 @@ if __name__ == "__main__":
 
         # Group by Z and show mean accuracy
         if "GlobalAccuracy" in df_global_stats.columns:
-            summary = df_global_stats.groupby("Z")["GlobalAccuracy"].agg(
-                ["mean", "std", "count"]
-            )
+            summary = df_global_stats["GlobalAccuracy"].agg(["mean", "std", "count"])
             print("\nAccuracy by Z (number of partitions):")
             print(summary)
 
         # Training time analysis
         if "ClientTrainingTime" in df_client_stats.columns:
-            summary = df_client_stats.groupby("Z")["ClientTrainingTime"].agg(
-                ["mean", "std"]
-            )
+            summary = df_client_stats["ClientTrainingTime"].agg(["mean", "std"])
             print("\nTraining time (ms) by Z:")
             print(summary)
 
     # 5. Export combined data
-    df_experiments.to_csv("analysis_output/exp3/combined_experiments.csv", index=True)
+    # df_experiments.to_csv("analysis_output/exp3/combined_experiments.csv", index=True)
     if not df_global_stats.empty:
         df_global_stats.to_csv(
             "analysis_output/exp3/combined_global_stats.csv", index=False
@@ -197,9 +189,5 @@ if __name__ == "__main__":
     if not df_energy_stats.empty:
         df_energy_stats.to_csv(
             "analysis_output/exp3/combined_energy_stats.csv", index=False
-        )
-    if not df_bandwidth_stats.empty:
-        df_bandwidth_stats.to_csv(
-            "analysis_output/combined_bandwidth_stats.csv", index=False
         )
     print("\nCombined CSVs saved!")

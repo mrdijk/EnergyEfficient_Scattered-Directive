@@ -546,12 +546,8 @@ func runHFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 	}
 
 	// Select partitions for clients
-	// numClients := len(clients)
-	// selectedPartitions := selectRandomPartitions(partitionConfig.Partitions, numClients)
-	selectedPartitions := make([]Partition, len(clients))
-	for i, _ := range selectedPartitions {
-		selectedPartitions[i] = partitionConfig.Partitions[i*5]
-	}
+	numClients := len(clients)
+	selectedPartitions := selectRandomPartitions(partitionConfig.Partitions, numClients)
 
 	// logger.Sugar().Infof("Selected %d partitions for %d clients", len(selectedPartitions), numClients)
 	// logger.Sugar().Info("Sending ping to start pods...")
