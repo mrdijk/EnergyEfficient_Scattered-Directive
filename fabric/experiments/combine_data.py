@@ -1,29 +1,34 @@
 import json
 import os
+import re
 from pathlib import Path
 
 import pandas as pd
 
 
 def parse_experiment_path(path):
-    """Extract experiment parameters from directory structure."""
     parts = Path(path).parts
-    # Extract K (number of clients)
+
+    # 1. Precise exp extraction
+    exp_match = [p for p in parts if re.fullmatch(r"exp\d+", p)]
+    exp = exp_match[0] if exp_match else "unknown_exp"
+
+    # 2. Extract K
     k_part = [p for p in parts if p.startswith("K")][0]
     K = int(k_part[1:])
 
-    # Extract Z, ed, iid from folder name like "Z015_ed1000p0_iid10"
+    # 3. Extract Z, ed, iid
     config_part = [p for p in parts if p.startswith("Z")][0]
     z_str, ed_str, iid_str = config_part.split("_")
-
     Z = int(z_str[1:])
     ed = float(ed_str[2:].replace("p", "."))
     iid = int(iid_str[3:])
 
-    # Extract timestamp
-    timestamp_part = [p for p in parts if "-" in p and p[0].isdigit()][-1]
+    # 4. Timestamp (The very last part of your provided path)
+    timestamp_part = parts[-1]
 
     return {
+        "exp": exp,
         "K": K,
         "Z": Z,
         "sigma_ed": ed,
@@ -67,21 +72,21 @@ def combine_all_experiments(data_root):
 
     # Find all experiment directories (those with timestamps)
     for root, dirs, files in os.walk(data_root):
-        # print("Current directory:", root)
+        print("Current directory:", root)
         # print("Subdirectories:", dirs)
         # print("Files:", files)
-        # print("----------------")
+        print("----------------")
         # Check if this is an experiment directory (contains result files)
         if any(f.endswith(".csv") or f.endswith(".json") for f in files):
             exp_dir = Path(root)
             # Parse experiment parameters
             exp_params = parse_experiment_path(exp_dir)
-            print(exp_params)
+            # print(exp_params)
 
             # Read client stats
             client_stats = read_csv_file(exp_dir, "client_stats.csv")
             if client_stats is not None:
-                for col in ["K", "Z", "sigma_ed", "sigma_iid", "timestamp"]:
+                for col in ["exp", "K", "Z", "sigma_ed", "sigma_iid", "timestamp"]:
                     # for col in ["K", "timestamp"]:
                     client_stats[col] = exp_params[col]
                 all_client_stats.append(client_stats)
@@ -90,7 +95,7 @@ def combine_all_experiments(data_root):
             global_stats = read_csv_file(exp_dir, "global_stats.csv")
             if global_stats is not None:
                 # for col in ["K", "timestamp"]:
-                for col in ["K", "Z", "sigma_ed", "sigma_iid", "timestamp"]:
+                for col in ["exp", "K", "Z", "sigma_ed", "sigma_iid", "timestamp"]:
                     global_stats[col] = exp_params[col]
                 all_global_stats.append(global_stats)
 
@@ -98,7 +103,7 @@ def combine_all_experiments(data_root):
             energy_data = read_csv_file(exp_dir, "energy_consumption.csv")
             if energy_data is not None:
                 # for col in ["K", "timestamp"]:
-                for col in ["K", "Z", "sigma_ed", "sigma_iid", "timestamp"]:
+                for col in ["exp", "K", "Z", "sigma_ed", "sigma_iid", "timestamp"]:
                     energy_data[col] = exp_params[col]
                 all_energy_data.append(energy_data)
 
@@ -137,7 +142,9 @@ def combine_all_experiments(data_root):
 
 if __name__ == "__main__":
     """Generate summary statistics across all experiments."""
-    data_root = "/home/maurits/EnergyEfficient_Scattered-Directive/fabric/data/exp3"
+    data_root = (
+        "/home/maurits/EnergyEfficient_Scattered-Directive/fabric/experiments/data"
+    )
 
     (
         df_client_stats,
@@ -176,18 +183,20 @@ if __name__ == "__main__":
             print("\nTraining time (ms) by Z:")
             print(summary)
 
+    print(df_global_stats["exp"][0])
+    Path("analysis_output/exp1").mkdir(parents=True, exist_ok=True)
     # 5. Export combined data
     # df_experiments.to_csv("analysis_output/exp3/combined_experiments.csv", index=True)
     if not df_global_stats.empty:
         df_global_stats.to_csv(
-            "analysis_output/exp3/combined_global_stats.csv", index=False
+            "analysis_output/exp1/combined_global_stats.csv", index=False
         )
     if not df_client_stats.empty:
         df_client_stats.to_csv(
-            "analysis_output/exp3/combined_client_stats.csv", index=False
+            "analysis_output/exp1/combined_client_stats.csv", index=False
         )
     if not df_energy_stats.empty:
         df_energy_stats.to_csv(
-            "analysis_output/exp3/combined_energy_stats.csv", index=False
+            "analysis_output/exp1/combined_energy_stats.csv", index=False
         )
     print("\nCombined CSVs saved!")

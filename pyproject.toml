@@ -1,0 +1,26 @@
+[project]
+name = "energyefficient-scattered-directive"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "mrdijk", email = "mauritsdijk@gmail.com"}
+]
+requires-python = ">=3.11"
+dependencies = [
+    "matplotlib>=3.10.9",
+    "pandas>=1.5.3",
+    "numpy>=1.25.2",
+    "seaborn",
+    "pyrca>=0.2.2",
+    "requests>=2.32",
+    "scikit-learn>=1.1.3",
+    "pycaret>=3.2",
+    "scipy>=1.10"
+]
+
+[tool.poetry]
+package-mode = false
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
