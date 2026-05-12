@@ -8,26 +8,39 @@ import pandas as pd
 from sklearn.neighbors import NearestNeighbors
 from sklearn.preprocessing import StandardScaler
 
-# %% Cell
-# Get the directories in the data folder
-path = (
-    "/home/maurits/EnergyEfficient_Scattered-Directive/fabric/experiments/data/exp1/K05"
-)
-data_folder_exp_dirs = []
-directories = [d for d in os.listdir(path) if os.path.isdir(os.path.join(path, d))]
-print("Directories:", directories)
 # %%
-df = pd.read_csv(
-    "/home/maurits/EnergyEfficient_Scattered-Directive/fabric/experiments/data/exp1/K05/combined_energy_stats.csv",
+energy = pd.read_csv(
+    "/home/maurits/EnergyEfficient_Scattered-Directive/fabric/experiments/data/exp1/combined_energy_stats.csv",
     index_col=0,
 )
-# Step 1: average the 3 timestamps per (Z, container_name, round)
-avg_cols = ["exp", "K", "Z", "sigma_ed", "sigma_iid", "container_name", "round"]
-averaged = df.groupby(avg_cols, as_index=False)["joules"].mean()
+global_stats = pd.read_csv(
+    "/home/maurits/EnergyEfficient_Scattered-Directive/fabric/experiments/data/exp1/combined_global_stats.csv",
+    index_col=0
+)
+# Rename the global_stats index to 'round' to match energy df
+global_stats = global_stats.rename_axis("round").reset_index()
 
-# Step 2: DBSCAN per (Z, container_name) across rounds
-group_cols = ["exp", "K", "Z", "sigma_ed", "sigma_iid", "container_name"]
-averaged.groupby(group_cols).sum()
+# Pivot energy: one column per container
+join_cols = ["exp", "K", "Z", "sigma_ed", "sigma_iid", "timestamp", "round"]
+
+energy_wide = energy.pivot_table(
+    index=join_cols,
+    columns=["namespace","pod_name","container_name"],
+    values="joules",
+    aggfunc="sum"  # sum across pod_name in case multiple pods per container type
+).reset_index()
+
+# Flatten column names
+energy_wide.columns.name = None
+
+# Merge with global stats
+result = pd.merge(global_stats, energy_wide, on=join_cols, how="inner")
+
+print(result.shape)  # should be (75, ...) per Z
+print(result.head())
+
+result.to_csv("rounds_dataset.csv", index=False)
+# %%
 
 # %%
 k = 2  # min_samples - 1

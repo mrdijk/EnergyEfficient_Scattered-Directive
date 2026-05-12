@@ -1,63 +1,58 @@
-import argparse
-import os
-import shutil
-from pathlib import Path
-
+import numpy as np
 import pandas as pd
-from sklearn.cluster import DBSCAN
+from scipy.spatial import distance
+from sklearn import preprocessing
+from sklearn.cluster import DBSCAN, Birch
+from sklearn.neighbors import NearestNeighbors
 from sklearn.preprocessing import StandardScaler
 
-PATH = "/home/maurits/EnergyEfficient_Scattered-Directive/fabric/experiments/data/exp1/K05/Z015_ed1000p0_iid10"
+df = pd.read_csv("/home/maurits/EnergyEfficient_Scattered-Directive/fabric/experiments/data/exp1/combined_energy_stats.csv", index_col=0)
 
-if __name__ == "__main__":
-    df = pd.read_csv(
-        "/home/maurits/EnergyEfficient_Scattered-Directive/fabric/experiments/data/exp1/K05/combined_energy_stats.csv",
-        index_col=0,
-    )
-    # Step 1: average the 3 timestamps per (Z, container_name, round)
-    avg_cols = ["exp", "K", "Z", "sigma_ed", "sigma_iid", "container_name", "round"]
-    averaged = df.groupby(avg_cols, as_index=False)["joules"].mean()
+k = 2
 
-    # Step 2: DBSCAN per (Z, container_name) across rounds
-    group_cols = ["exp", "K", "Z", "sigma_ed", "sigma_iid", "container_name"]
+def find_elbow(k_distances):
+    diffs = np.diff(k_distances)
+    elbow_idx = np.argmin(diffs)
+    return k_distances[elbow_idx + 1]
 
-    anomalous_rounds = []
+group_cols = ["exp", "K", "Z", "sigma_ed", "sigma_iid", "namespace", "pod_name", "container_name"]
 
-    for group_keys, group in averaged.groupby(group_cols):
-        if len(group) < 2:
-            continue
+anomalous = []
 
-        X = group[["joules"]].values
-        X_scaled = StandardScaler().fit_transform(X)
+for group_keys, group in df.groupby(group_cols):
+    if len(group) < k + 1:
+        continue
 
-        db = DBSCAN(eps=0.25, min_samples=2).fit(X_scaled)
-        group = group.copy()
-        group["dbscan_label"] = db.labels_
+    X = group[["joules"]].values
 
-        # Only keep flagged rounds that are genuinely far out
-        group["zscore"] = (group["joules"] - group["joules"].mean()) / group[
-            "joules"
-        ].std()
-        outliers = group[(group["dbscan_label"] == -1) & (group["zscore"].abs() > 2.5)]
+    if X.std() == 0:
+        continue
 
-        # outliers = group[group["dbscan_label"] == -1]
-        if not outliers.empty:
-            anomalous_rounds.append(outliers)
+    X_scaled = StandardScaler().fit_transform(X)
 
-    if anomalous_rounds:
-        result = pd.concat(anomalous_rounds, ignore_index=True)
-        print(f"Anomalous (container, round) pairs found: {len(result)}\n")
-        print(result[group_cols + ["round", "joules"]].to_string(index=False))
-        result.to_csv("anomalous_rounds.csv", index=False)
-    else:
-        print("No anomalies detected.")
+    nbrs = NearestNeighbors(n_neighbors=k).fit(X_scaled)
+    distances, _ = nbrs.kneighbors(X_scaled)
+    k_distances = np.sort(distances[:, -1])[::-1]
+    eps = find_elbow(k_distances)
 
-    for _, row in result.iterrows():
-        mask = (averaged["Z"] == row["Z"]) & (
-            averaged["container_name"] == row["container_name"]
-        )
-        group = averaged[mask]["joules"]
-        print(f"Z={row['Z']} {row['container_name']} round={row['round']}")
-        print(
-            f"  flagged: {row['joules']:.2f}  |  mean: {group.mean():.2f}  std: {group.std():.2f}  min: {group.min():.2f}  max: {group.max():.2f}\n"
-        )
+    if eps == 0.0 or np.isnan(eps):
+        continue
+
+    db = DBSCAN(eps=eps, min_samples=2).fit(X_scaled)
+    group = group.copy()
+    group["dbscan_label"] = db.labels_
+    group["zscore"] = (group["joules"] - group["joules"].mean()) / group["joules"].std()
+
+    outliers = group[(group["dbscan_label"] == -1) & (group["zscore"].abs() > 2.5)]
+    if not outliers.empty:
+        anomalous.append(outliers)
+
+if anomalous:
+    result = pd.concat(anomalous, ignore_index=True)
+    print(f"Anomalous data points found: {len(result)}\n")
+    print(result[group_cols + ["round", "timestamp", "joules", "zscore"]].to_string(index=False))
+    print(result.groupby("container_name")["joules"].count().sort_values(ascending=False))
+    print(result.groupby("Z")["joules"].count().sort_values(ascending=False))
+    result.to_csv("anomalous_datapoints.csv", index=False)
+else:
+    print("No anomalies detected.")
