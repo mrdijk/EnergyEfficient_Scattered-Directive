@@ -18,36 +18,6 @@ PROM_KEPLER_CONTAINER_LABEL = "container_namespace, pod_name, container_name"
 PROM_ENERGY_QUERY_TOTAL = f"sum({PROM_KEPLER_ENERGY_METRIC}{PROM_CONTAINER_NS}) by ({PROM_KEPLER_CONTAINER_LABEL})"
 PROM_ENERGY_QUERY_RANGE = f"sum(increase({PROM_KEPLER_ENERGY_METRIC}{PROM_CONTAINER_NS}[2m])) by ({PROM_KEPLER_CONTAINER_LABEL})"
 
-# Experiment configurations
-IDLE_PERIOD = 120  # Idle period in seconds
-ACTIVE_PERIOD = 120  # Active period in seconds
-LEARNING_RATE = 0.01
-DATA_PROVIDERS = {
-    "client1": 3799,
-    "client2": 10570,
-    "client3": 4725,
-    "client4": 2182,
-    "client5": 17938,
-    "client6": 2447,
-    "client7": 1681,
-    "client8": 1729,
-    "client9": 6896,
-    "client10": 14812,
-    "client11": 2778,
-    "client12": 3746,
-    "client13": 4337,
-    "client14": 2146,
-    "client15": 2665,
-    "client16": 1711,
-    "client17": 2094,
-    "client18": 3188,
-    "client19": 2265,
-    "client20": 8281,
-}
-# Removed 'client11': 2778, 'client15': 2665 and 'client19': 2265  due to resource constraints (too little disk space)
-# clients are supposed to have 100GB, client15 has 10GB
-# Mean number of rows is 5428 instead of 5000
-
 # Add specific FABRIC Kubernetes setup for these urls
 APPROVAL_URL = f"{NODEPORT_BASE_URL}/api/v1/requestApproval"
 HEADERS = {

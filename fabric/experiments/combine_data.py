@@ -8,7 +8,7 @@ import pandas as pd
 
 def parse_experiment_path(path):
     parts = Path(path).parts
-
+    print(parts)
     # 1. Precise exp extraction
     exp_match = [p for p in parts if re.fullmatch(r"exp\d+", p)]
     exp = exp_match[0] if exp_match else "unknown_exp"
@@ -73,11 +73,11 @@ def combine_all_experiments(data_root):
     # Find all experiment directories (those with timestamps)
     for root, dirs, files in os.walk(data_root):
         print("Current directory:", root)
-        # print("Subdirectories:", dirs)
-        # print("Files:", files)
+        print("Subdirectories:", dirs)
+        print("Files:", files)
         print("----------------")
         # Check if this is an experiment directory (contains result files)
-        if any(f.endswith(".csv") or f.endswith(".json") for f in files):
+        if "K" in root and any(f.endswith(".csv") or f.endswith(".json") for f in files):
             exp_dir = Path(root)
             # Parse experiment parameters
             exp_params = parse_experiment_path(exp_dir)
@@ -143,7 +143,7 @@ def combine_all_experiments(data_root):
 if __name__ == "__main__":
     """Generate summary statistics across all experiments."""
     data_root = (
-        "/home/maurits/EnergyEfficient_Scattered-Directive/fabric/experiments/data"
+        "/home/maurits/EnergyEfficient_Scattered-Directive/fabric/experiments/data/"
     )
 
     (

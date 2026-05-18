@@ -1,162 +1,244 @@
-import os
-
 import numpy as np
 import pandas as pd
-from pycaret.anomaly import *
 from scipy.spatial import distance
 from sklearn import preprocessing
+from sklearn.cluster import DBSCAN, Birch
+from sklearn.neighbors import NearestNeighbors
+from sklearn.preprocessing import StandardScaler
 
-# Import BIRCH libraries (sklearn comes from "pip install scikit-learn")
-from sklearn.cluster import Birch
+# Path to your combined energy CSV (long format)
+ENERGY_DATA_FILE = "data/combined_energy_stats.csv"
+# Output path for AD results
+BIRCH_AD_RESULTS_FILE = "data/BIRCH_AD_results.csv"
+DBSCAN_AD_RESULTS_FILE = "data/DBSCAN_AD_results.csv"
 
-# Import utils
-from utils import get_folder_path, unix_time_to_datetime
-
-# Folder where the gathered energy metrics are stored
-# ENERGY_DATA_FOLDER = get_folder_path('data-collection/data', 1)
-ENERGY_DATA_FOLDER = "/home/maurits/EnergyEfficient_Scattered-Directive/fabric/experiments/data/exp1"
-# Path to the energy metrics file (from get_metrics.py)
-ENERGY_DATA_FILE = os.path.join(ENERGY_DATA_FOLDER, 'combined_energy_stats.csv')
-# Folder where the algorithms data is stored
-ALGORITHMS_DATA_FOLDER = get_folder_path('data/exp1')
-# Path to the converted energy metrics file (after CPU conversion)
-CONVERTED_ENERGY_DATA_FILE = os.path.join(
-    ALGORITHMS_DATA_FOLDER, 'converted_energy_metrics.csv')
-
-
-def main():
+def load_and_pivot(filepath: str) -> dict[tuple, pd.DataFrame]:
     """
-    Main function of the anomaly detection.
+    Load the long-format energy CSV and pivot to wide format per
+    (exp, K, Z, sigma_ed, sigma_iid), concatenating all timestamps so that
+    repeated runs of the same configuration become a single contiguous series.
+
+    Each timestamp's rounds (0..N-1) are offset by the cumulative round count
+    of preceding timestamps, giving globally unique row indices across runs.
+    This means BIRCH sees 75 data points per Z (3 runs × 25 rounds) rather
+    than 25 per timestamp, making the 95th-percentile threshold more meaningful.
+
+    The output DataFrame retains a 'timestamp' column so anomalous rounds can
+    be traced back to the specific run they came from.
+
+    Returns a dict keyed by (exp, K, Z, sigma_ed, sigma_iid).
     """
-    # Convert the CPU metrics to percentage
-    # cpu_to_percentage()
+    df = pd.read_csv(filepath, index_col=0)
+    df = df[df["exp"] == "exp1"]
 
-    # Training not required for BIRCH here, it is done in the BIRCH function itself
+    config_cols = ["exp", "K", "Z", "sigma_ed", "sigma_iid"]
+    pivoted = {}
 
+    for config_key, config_group in df.groupby(config_cols):
+        run_frames = []
+        global_round_offset = 0
+
+        # Sort timestamps so runs are concatenated in a consistent order
+        for timestamp, ts_group in config_group.groupby("timestamp", sort=True):
+            wide = ts_group.pivot_table(
+                index="round",
+                columns="container_name",
+                values="joules",
+                aggfunc="sum",
+            )
+            wide.columns = [f"{c}_energy" for c in wide.columns]
+            wide = wide.reset_index()
+
+            n_rounds = len(wide)
+            wide["global_round"] = wide["round"] + global_round_offset
+            wide["timestamp"] = timestamp
+
+            run_frames.append(wide)
+            global_round_offset += n_rounds
+
+        combined = pd.concat(run_frames, ignore_index=True)
+        pivoted[config_key] = combined
+
+    return pivoted
+
+
+def run_BIRCH_AD(temp_df: pd.DataFrame, df: pd.DataFrame, column: str) -> pd.DataFrame:
     """
-    Ground truth in the study from Ivano and his colleagues refers to the labeled data that indicates which data points
-    are actual anomalies, generated using statistical thresholds. It is used as a benchmark to evaluate the performance
-    of the anomaly detection models, allowing comparison between the model's predictions and the known anomalies.
+    Run BIRCH anomaly detection on a single column (container energy series).
+    Operates on the full pooled series (all timestamps for a given Z), so the
+    95th-percentile threshold is computed over 75 points rather than 25.
 
-    However, for DYNAMOS, only the output of the algorithms is required, so the ground truth is not used in this case
-    and therefore not included in the code.
+    Smoothing window is scaled to span roughly one full run's worth of rounds,
+    so transient within-run noise is suppressed while cross-run deviations remain
+    detectable.
     """
-
-    # Execute BIRCH AD algorithm
-    execute_BIRCH_AD_algorithm()
-
-
-def cpu_to_percentage() -> None:
-    print("Converting CPU metrics to percentage...")
-
-    # Read the CSV file and parse the 'time' column while converting Unix timestamps
-    result_df = pd.read_csv(ENERGY_DATA_FILE, parse_dates=[
-                            "time"], date_parser=unix_time_to_datetime)
-
-    # Additional processing remains the same
-    temp_df = pd.read_csv(ENERGY_DATA_FILE)
-
-    # Convert the cpu metrics to percentage
-    for col in result_df.columns:
-        if col.endswith("_cpu"):
-            # Multiply the value by 100 to get the cpu percentage
-            temp_df[col] = result_df[col] * 100
-
-    # Remove disk data due to the existing bug in Cadvisor
-    columns_to_drop = [col for col in temp_df.columns if '_disk' in col]
-    temp_df.drop(columns=columns_to_drop, inplace=True)
-
-    # Save the converted file in the data folder
-    output_file = os.path.join(
-        ALGORITHMS_DATA_FOLDER, 'converted_energy_metrics.csv')
-    print(f"Saving the converted data to {output_file}...")
-    # Write the data to the output file
-    temp_df.to_csv(output_file, index=False)
-
-
-def run_BIRCH_AD_with_smoothing(temp_df: pd.DataFrame, df: pd.DataFrame, column) -> pd.DataFrame:
-    # Define anomaly detection threshold for BIRCH clustering
     ad_threshold = 0.045
-    # Define window size for smoothing the data
     smoothing_window = 12
-    # Extract the time and the specific column for analysis
-    test_df = df.loc[:, ["time", column]]
 
-    # Iterate over each column in the test dataframe
+    test_df = df[["global_round", column]].copy()
+
     for column_name, column_data in test_df.items():
-        # Skip the 'time' column since it's not relevant for clustering
-        if column_name != 'time':
-            # Apply a rolling mean to smooth the column data (energy data e.g. CPU, memory, energy, etc.)
+        if column_name != "global_round":
             column_data = column_data.rolling(
-                window=smoothing_window, min_periods=1).mean()
+                window=smoothing_window, min_periods=1
+            ).mean()
 
-            # Convert the smoothed series to a NumPy array
             x = np.array(column_data)
-            # Replace NaN values with 0 to ensure no missing data is passed to the algorithm
             x = np.where(np.isnan(x), 0, x)
-            # Normalize the data to ensure all values are on a similar scale
+
+            # Skip zero-variance columns (e.g. linkerd-init always 0)
+            if x.std() == 0:
+                temp_df[f"{column}_Anomaly"] = 0
+                temp_df[f"{column}_Anomaly_Score"] = 0.0
+                continue
+
             normalized_x = preprocessing.normalize([x])
-            # Reshape the normalized data to a 2D array as required by BIRCH
             X = normalized_x.reshape(-1, 1)
 
-            # Initialize the BIRCH model with the specified parameters
-            birch = Birch(branching_factor=50, n_clusters=None,
-                          threshold=ad_threshold, compute_labels=True)
-
-            # Build the CF tree for the input data (i.e. perform clustering)
+            birch = Birch(
+                branching_factor=50,
+                n_clusters=None,
+                threshold=ad_threshold,
+                compute_labels=True,
+            )
             birch.fit(X)
-            # Use the fitted model to predict the cluster labels for the data
             birch.predict(X)
 
-            # Calculate the Euclidean distances (straight-line distance between two points in a plane or space)
-            # from each data point to all cluster centers. `X` contains the data points, and `birch.subcluster_centers_`
-            # contains the centers of the subclusters identified by BIRCH. `distance.cdist` computes the distance between
-            # each data point and each cluster center.
             distances = distance.cdist(X, birch.subcluster_centers_)
-            # For each data point, find the minimum distance to any of the cluster centers.
-            # This minimum distance represents how close the point is to the nearest cluster center.
-            # A smaller distance indicates that the point is well represented by the cluster, while a
-            # larger distance might suggest that the point is an outlier or anomaly.
             min_distances = np.min(distances, axis=1)
 
-            # Set a threshold to identify anomalies based on the distribution of minimum distances.
-            # Here, the 95th percentile is chosen, meaning that points with a distance greater than 95%
-            # of all points are considered anomalies. This is based on the assumption that most data points
-            # should be near a cluster center, and only a few should be far away.
-            threshold = np.percentile(min_distances, 95)
+            threshold = np.percentile(min_distances, 99)
+            test_df["anomaly_label"] = np.where(min_distances > threshold, 1, 0)
 
-            # Label data points as anomalies (1) if their distance exceeds the threshold, else normal (0)
-            test_df['anomaly_label'] = np.where(
-                min_distances > threshold, 1, 0)
+            temp_df = temp_df.assign(**{
+                f"{column}_Anomaly": test_df["anomaly_label"].values,
+                f"{column}_Anomaly_Score": min_distances,
+            })
 
-            # Update the original dataframe with the anomaly labels and scores as new columns
-            temp_df = temp_df.assign(
-                **{
-                    # Anomaly labels (0 or 1)
-                    f"{column}_Anomaly": test_df['anomaly_label'],
-                    # Anomaly scores (distances)
-                    f"{column}_Anomaly_Score": min_distances,
-                }
-            )
-
-    # Return the updated dataframe with the anomaly information
     return temp_df
 
+def find_elbow(k_distances):
+    diffs = np.diff(k_distances)
+    elbow_idx = np.argmin(diffs)
+    return k_distances[elbow_idx + 1]
 
-def execute_BIRCH_AD_algorithm():
-    print("Start executing BIRCH AD algorithm...")
-    # Read the converted energy metrics file
-    df = pd.read_csv(ENERGY_DATA_FILE)
-    temp_df = pd.read_csv(ENERGY_DATA_FILE)
+def run_DBSCAN_AD(temp_df: pd.DataFrame, df: pd.DataFrame, column: str) -> pd.DataFrame:
+    """
+    Run DBSCAN anomaly detection on a single column (container energy series).
+    Points assigned to cluster -1 (noise) by DBSCAN are treated as anomalies.
 
-    # Iterate over each column in the dataframe
-    for column in df.columns:
-        # Run BIRCH algorithm and accumulate the results. Update the temp_df with
-        # the new results for this column (next iteration will use this updated data)
-        temp_df = run_BIRCH_AD_with_smoothing(temp_df, df, column)
+    eps controls the neighbourhood radius in normalised space; min_samples is
+    kept low (2) since each series has ~75 points and genuine anomalies are
+    expected to be isolated rather than clustered.
+    """
+    smoothing_window = 12
+    eps = 0.2
+    min_samples = 2
+    k = 2
 
-    # Save the combined results to the CSV file
-    # temp_df contains the results for all columns
-    results_path = os.path.join(ALGORITHMS_DATA_FOLDER, 'BIRCH_AD_results.csv')
-    print(f"Saving BIRCH AD results data to {results_path}...")
-    temp_df.to_csv(results_path, index=False)
+    test_df = df[["global_round", column]].copy()
+
+    for column_name, column_data in test_df.items():
+        if column_name != "global_round":
+            column_data = column_data.rolling(
+                window=smoothing_window, min_periods=1
+            ).mean()
+
+            x = np.array(column_data)
+            x = np.where(np.isnan(x), 0, x)
+
+            # Skip zero-variance columns (e.g. linkerd-init always 0)
+            if x.std() == 0:
+                temp_df[f"{column}_Anomaly"] = 0
+                temp_df[f"{column}_Anomaly_Score"] = 0.0
+                continue
+
+            # normalized_x = preprocessing.normalize([x])
+            # X = normalized_x.reshape(-1, 1)
+            X = x.reshape(-1, 1)
+            X_scaled = StandardScaler().fit_transform(X)
+
+            nbrs = NearestNeighbors(n_neighbors=k).fit(X_scaled)
+            distances, _ = nbrs.kneighbors(X_scaled)
+            k_distances = np.sort(distances[:, -1])[::-1]
+            eps = find_elbow(k_distances)
+
+            if eps == 0.0 or np.isnan(eps):
+                continue
+
+            dbscan = DBSCAN(
+                eps=eps,
+                min_samples=min_samples,
+                metric="euclidean",
+            )
+            labels = dbscan.fit_predict(X_scaled)
+
+            # DBSCAN marks noise points as -1 — these are our anomalies
+            anomaly_flags = np.where(labels == -1, 1, 0)
+
+            # Anomaly score: distance to nearest core point (or 0 if core itself)
+            if len(dbscan.core_sample_indices_) > 0:
+                core_points = X_scaled[dbscan.core_sample_indices_]
+                scores = np.min(distance.cdist(X_scaled, core_points), axis=1)
+            else:
+                # Degenerate case: no core points found, flag everything
+                scores = np.ones(len(X_scaled))
+
+            temp_df = temp_df.assign(**{
+                f"{column}_Anomaly": anomaly_flags,
+                f"{column}_Anomaly_Score": scores,
+            })
+
+    return temp_df
+
+def main():
+    print("Starting Anomaly Detection (pooled across timestamps per Z)...")
+
+    pivoted = load_and_pivot(ENERGY_DATA_FILE)
+    all_results = []
+
+    for (exp, K, Z, sigma_ed, sigma_iid), wide_df in pivoted.items():
+        n_runs = wide_df["timestamp"].nunique()
+        n_rows = len(wide_df)
+        print(f"  Processing exp={exp} K={K} Z={Z}  ({n_runs} runs, {n_rows} rows)...")
+
+        temp_df = wide_df.copy()
+        energy_cols = [c for c in wide_df.columns if c.endswith("_energy")]
+
+        # for col in energy_cols:
+        #     temp_df = run_BIRCH_AD(temp_df, wide_df, col)
+        for col in energy_cols:
+            temp_df = run_DBSCAN_AD(temp_df, wide_df, col)
+
+
+        # Tag with experiment identifiers
+        temp_df["exp"] = exp
+        temp_df["K"] = K
+        temp_df["Z"] = Z
+        temp_df["sigma_ed"] = sigma_ed
+        temp_df["sigma_iid"] = sigma_iid
+        # 'timestamp' is already a column from load_and_pivot
+
+        all_results.append(temp_df)
+
+    results = pd.concat(all_results, ignore_index=True)
+    # results.to_csv(BIRCH_AD_RESULTS_FILE, index=False)
+    # print(f"\nAD results saved to {BIRCH_AD_RESULTS_FILE}")
+    results.to_csv(DBSCAN_AD_RESULTS_FILE, index=False)
+    print(f"\nAD results saved to {DBSCAN_AD_RESULTS_FILE}")
+
+    # Summary: anomaly flags per container, broken down by Z
+    anomaly_cols = [
+        c for c in results.columns
+        if c.endswith("_Anomaly") and not c.endswith("_Score")
+    ]
+    print("\nAnomalous rounds per container (flagged > 0):")
+    summary = results.groupby("Z")[anomaly_cols].sum()
+    # Only print containers that were flagged at least once across all Z
+    flagged_cols = summary.columns[summary.sum() > 0]
+    print(summary[flagged_cols].to_string())
+    # print(summary[flagged_cols])
+
+
+if __name__ == "__main__":
+    main()

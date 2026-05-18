@@ -6,7 +6,7 @@ from sklearn.cluster import DBSCAN, Birch
 from sklearn.neighbors import NearestNeighbors
 from sklearn.preprocessing import StandardScaler
 
-df = pd.read_csv("/home/maurits/EnergyEfficient_Scattered-Directive/fabric/experiments/data/exp1/combined_energy_stats.csv", index_col=0)
+df = pd.read_csv("/home/maurits/EnergyEfficient_Scattered-Directive/fabric/experiments/data/baseline/idle_baseline.csv", index_col=0)
 
 k = 2
 
@@ -15,7 +15,8 @@ def find_elbow(k_distances):
     elbow_idx = np.argmin(diffs)
     return k_distances[elbow_idx + 1]
 
-group_cols = ["exp", "K", "Z", "sigma_ed", "sigma_iid", "namespace", "pod_name", "container_name"]
+# group_cols = ["exp", "K", "Z", "sigma_ed", "sigma_iid", "namespace", "pod_name", "container_name"]
+group_cols = ["namespace", "pod_name", "container_name"]
 
 anomalous = []
 
