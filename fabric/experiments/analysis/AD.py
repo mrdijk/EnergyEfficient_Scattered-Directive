@@ -1,5 +1,7 @@
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import seaborn as sns
 from scipy.spatial import distance
 from sklearn import preprocessing
 from sklearn.cluster import DBSCAN, Birch
@@ -12,26 +14,21 @@ ENERGY_DATA_FILE = "data/combined_energy_stats.csv"
 BIRCH_AD_RESULTS_FILE = "data/BIRCH_AD_results.csv"
 DBSCAN_AD_RESULTS_FILE = "data/DBSCAN_AD_results.csv"
 
+
 def load_and_pivot(filepath: str) -> dict[tuple, pd.DataFrame]:
     """
     Load the long-format energy CSV and pivot to wide format per
-    (exp, K, Z, sigma_ed, sigma_iid), concatenating all timestamps so that
-    repeated runs of the same configuration become a single contiguous series.
+    (exp, K, Z, sigma_ed, sigma_iid, timestamp).
 
-    Each timestamp's rounds (0..N-1) are offset by the cumulative round count
-    of preceding timestamps, giving globally unique row indices across runs.
-    This means BIRCH sees 75 data points per Z (3 runs × 25 rounds) rather
-    than 25 per timestamp, making the 95th-percentile threshold more meaningful.
+    Each run (timestamp) is kept separate, so AD runs on 25 rounds at a time
+    rather than pooled across runs.
 
-    The output DataFrame retains a 'timestamp' column so anomalous rounds can
-    be traced back to the specific run they came from.
-
-    Returns a dict keyed by (exp, K, Z, sigma_ed, sigma_iid).
+    Returns a dict keyed by (exp, K, Z, sigma_ed, sigma_iid, timestamp).
     """
     df = pd.read_csv(filepath, index_col=0)
-    df = df[df["exp"] == "exp1"]
 
     config_cols = ["exp", "K", "Z", "sigma_ed", "sigma_iid"]
+    # config_cols = ["exp", "K", "Z", "sigma_ed", "sigma_iid", "timestamp"]
     pivoted = {}
 
     for config_key, config_group in df.groupby(config_cols):
@@ -58,27 +55,32 @@ def load_and_pivot(filepath: str) -> dict[tuple, pd.DataFrame]:
 
         combined = pd.concat(run_frames, ignore_index=True)
         pivoted[config_key] = combined
-
+        # wide = config_group.pivot_table(
+        #     index="round",
+        #     columns="container_name",
+        #     values="joules",
+        #     aggfunc="sum",
+        # )
+        # wide.columns = [f"{c}_energy" for c in wide.columns]
+        # wide = wide.reset_index()
+        # wide["timestamp"] = config_key[-1]   # last element of key is timestamp
+        # pivoted[config_key] = wide
     return pivoted
 
 
 def run_BIRCH_AD(temp_df: pd.DataFrame, df: pd.DataFrame, column: str) -> pd.DataFrame:
     """
     Run BIRCH anomaly detection on a single column (container energy series).
-    Operates on the full pooled series (all timestamps for a given Z), so the
-    95th-percentile threshold is computed over 75 points rather than 25.
-
-    Smoothing window is scaled to span roughly one full run's worth of rounds,
-    so transient within-run noise is suppressed while cross-run deviations remain
-    detectable.
+    Operates on a single run (25 rounds). Smoothing window kept short so it
+    doesn't span more than the available rounds.
     """
     ad_threshold = 0.045
-    smoothing_window = 12
+    smoothing_window = 12   # reduced from 12 — single run only has 25 points
 
-    test_df = df[["global_round", column]].copy()
+    test_df = df[["round", column]].copy()
 
     for column_name, column_data in test_df.items():
-        if column_name != "global_round":
+        if column_name != "round":
             column_data = column_data.rolling(
                 window=smoothing_window, min_periods=1
             ).mean()
@@ -86,7 +88,6 @@ def run_BIRCH_AD(temp_df: pd.DataFrame, df: pd.DataFrame, column: str) -> pd.Dat
             x = np.array(column_data)
             x = np.where(np.isnan(x), 0, x)
 
-            # Skip zero-variance columns (e.g. linkerd-init always 0)
             if x.std() == 0:
                 temp_df[f"{column}_Anomaly"] = 0
                 temp_df[f"{column}_Anomaly_Score"] = 0.0
@@ -117,29 +118,29 @@ def run_BIRCH_AD(temp_df: pd.DataFrame, df: pd.DataFrame, column: str) -> pd.Dat
 
     return temp_df
 
+
 def find_elbow(k_distances):
     diffs = np.diff(k_distances)
     elbow_idx = np.argmin(diffs)
     return k_distances[elbow_idx + 1]
+
 
 def run_DBSCAN_AD(temp_df: pd.DataFrame, df: pd.DataFrame, column: str) -> pd.DataFrame:
     """
     Run DBSCAN anomaly detection on a single column (container energy series).
     Points assigned to cluster -1 (noise) by DBSCAN are treated as anomalies.
 
-    eps controls the neighbourhood radius in normalised space; min_samples is
-    kept low (2) since each series has ~75 points and genuine anomalies are
-    expected to be isolated rather than clustered.
+    Operates on a single run (25 rounds). Smoothing window is reduced
+    accordingly so it doesn't over-smooth the short series.
     """
-    smoothing_window = 12
-    eps = 0.2
-    min_samples = 2
-    k = 2
+    smoothing_window = 5   # reduced from 12 — single run only has 25 points
+    min_samples = 3
+    k = min_samples - 1
 
-    test_df = df[["global_round", column]].copy()
+    test_df = df[["round", column]].copy()
 
     for column_name, column_data in test_df.items():
-        if column_name != "global_round":
+        if column_name != "round":
             column_data = column_data.rolling(
                 window=smoothing_window, min_periods=1
             ).mean()
@@ -147,14 +148,11 @@ def run_DBSCAN_AD(temp_df: pd.DataFrame, df: pd.DataFrame, column: str) -> pd.Da
             x = np.array(column_data)
             x = np.where(np.isnan(x), 0, x)
 
-            # Skip zero-variance columns (e.g. linkerd-init always 0)
             if x.std() == 0:
                 temp_df[f"{column}_Anomaly"] = 0
                 temp_df[f"{column}_Anomaly_Score"] = 0.0
                 continue
 
-            # normalized_x = preprocessing.normalize([x])
-            # X = normalized_x.reshape(-1, 1)
             X = x.reshape(-1, 1)
             X_scaled = StandardScaler().fit_transform(X)
 
@@ -173,15 +171,12 @@ def run_DBSCAN_AD(temp_df: pd.DataFrame, df: pd.DataFrame, column: str) -> pd.Da
             )
             labels = dbscan.fit_predict(X_scaled)
 
-            # DBSCAN marks noise points as -1 — these are our anomalies
             anomaly_flags = np.where(labels == -1, 1, 0)
 
-            # Anomaly score: distance to nearest core point (or 0 if core itself)
             if len(dbscan.core_sample_indices_) > 0:
                 core_points = X_scaled[dbscan.core_sample_indices_]
                 scores = np.min(distance.cdist(X_scaled, core_points), axis=1)
             else:
-                # Degenerate case: no core points found, flag everything
                 scores = np.ones(len(X_scaled))
 
             temp_df = temp_df.assign(**{
@@ -191,8 +186,9 @@ def run_DBSCAN_AD(temp_df: pd.DataFrame, df: pd.DataFrame, column: str) -> pd.Da
 
     return temp_df
 
+
 def main():
-    print("Starting Anomaly Detection (pooled across timestamps per Z)...")
+    print("Starting Anomaly Detection (per run / timestamp)...")
 
     pivoted = load_and_pivot(ENERGY_DATA_FILE)
     all_results = []
@@ -201,6 +197,8 @@ def main():
         n_runs = wide_df["timestamp"].nunique()
         n_rows = len(wide_df)
         print(f"  Processing exp={exp} K={K} Z={Z}  ({n_runs} runs, {n_rows} rows)...")
+    # for (exp, K, Z, sigma_ed, sigma_iid, timestamp), wide_df in pivoted.items():
+    #     print(f"  Processing exp={exp} K={K} Z={Z} ts={timestamp} ({len(wide_df)} rounds)...")
 
         temp_df = wide_df.copy()
         energy_cols = [c for c in wide_df.columns if c.endswith("_energy")]
@@ -210,14 +208,12 @@ def main():
         for col in energy_cols:
             temp_df = run_DBSCAN_AD(temp_df, wide_df, col)
 
-
-        # Tag with experiment identifiers
-        temp_df["exp"] = exp
-        temp_df["K"] = K
-        temp_df["Z"] = Z
-        temp_df["sigma_ed"] = sigma_ed
+        temp_df["exp"]       = exp
+        temp_df["K"]         = K
+        temp_df["Z"]         = Z
+        temp_df["sigma_ed"]  = sigma_ed
         temp_df["sigma_iid"] = sigma_iid
-        # 'timestamp' is already a column from load_and_pivot
+        # timestamp already present as a column
 
         all_results.append(temp_df)
 
@@ -227,17 +223,54 @@ def main():
     results.to_csv(DBSCAN_AD_RESULTS_FILE, index=False)
     print(f"\nAD results saved to {DBSCAN_AD_RESULTS_FILE}")
 
-    # Summary: anomaly flags per container, broken down by Z
+    # Summary: anomaly flags per container, broken down by (Z, timestamp)
     anomaly_cols = [
         c for c in results.columns
         if c.endswith("_Anomaly") and not c.endswith("_Score")
     ]
-    print("\nAnomalous rounds per container (flagged > 0):")
-    summary = results.groupby("Z")[anomaly_cols].sum()
-    # Only print containers that were flagged at least once across all Z
-    flagged_cols = summary.columns[summary.sum() > 0]
-    print(summary[flagged_cols].to_string())
-    # print(summary[flagged_cols])
+    # 2. Group by configuration and timestamp (Run ID)
+    # Note: Ensure your timestamp column name matches (e.g., 'timestamp' or 'ts')
+    run_summary = results.groupby(['exp', 'K', 'Z', 'timestamp'])[anomaly_cols].sum()
+
+    # 3. Filter for containers that had at least one anomaly
+    ACTIVE_CLIENTS = [
+        "client1", "client5", "client9", "client13", "client17",
+        "api-gateway", "orchestrator", "policy-enforcer",
+        "hfl-train", "hfl-train-model", "sidecar", "linker-proxy"]
+
+    # # Create a regex pattern: 'client1|client5|orchestrator|...'
+    # pattern = '|'.join(ACTIVE_CLIENTS)
+
+    # # Filter columns that contain any of those strings
+    # run_summary = run_summary.loc[:, run_summary.columns.str.contains(pattern)]
+
+    # 1. Strip the suffix so the names match your ACTIVE_CLIENTS list
+    run_summary.columns = run_summary.columns.str.replace('_energy_Anomaly', '')
+
+    # 2. Now the exact match will work
+    run_summary = run_summary[run_summary.columns.intersection(ACTIVE_CLIENTS)]
+     # 4. Apply the Threshold (> 10 anomalies)
+     # Filter Rows: Runs that have at least one container with > 10 anomalies
+     # Filter Columns: Containers that have > 10 anomalies in at least one run
+    filtered_summary = run_summary[(run_summary > 5).any(axis=1)]
+    filtered_summary = filtered_summary.loc[:, (filtered_summary > 5).any(axis=0)]
+
+    # 5. Visualize the "High-Anomaly" Matrix
+    if not filtered_summary.empty:
+        fig, ax = plt.subplots(figsize=(14, max(6, len(filtered_summary) * 0.6)))
+        ax = sns.heatmap(filtered_summary,
+                    cmap='YlOrRd',
+                    annot=True,
+                    fmt='g',
+                    linewidths=.5,
+                    cbar_kws={'label': 'Anomaly Count (> 10)'})
+        ax.tick_params(axis='x', rotation=45)
+
+    plt.title('High-Frequency Anomalies (>10 events per run)', fontsize=15)
+    plt.ylabel('Experiment Run (Config | Timestamp)')
+    plt.xlabel('Anomalous Containers')
+    plt.tight_layout()
+    plt.savefig("figures/DBSCAN_heatmap.png", dpi=300)
 
 
 if __name__ == "__main__":

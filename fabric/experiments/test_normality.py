@@ -13,9 +13,9 @@ def load_global_stats(filepath: str) -> dict[tuple, pd.DataFrame]:
         grouped[config_key] = group.reset_index(drop=True)
     return grouped
 
-def run_shapiro(df: pd.DataFrame, label: str = ""):
-    columns_to_test = ["AggregationTime", "TotalTrainingTime", "RoundDuration"]
-    print(f"\n--- Shapiro-Wilk normality tests {label} ---")
+def run_shapiro(df: pd.DataFrame, columns_to_test, label: str = ""):
+    cols = {}
+    # print(f"\n--- Shapiro-Wilk normality tests {label} ---")
     for col in columns_to_test:
         if col not in df.columns:
             print(f"  {col}: column not found")
@@ -25,10 +25,16 @@ def run_shapiro(df: pd.DataFrame, label: str = ""):
             print(f"  {col}: not enough data points ({len(data)})")
             continue
         stat, p = shapiro(data)
-        verdict = "NOT normal" if p < 0.05 else "normal"
-        print(f"  {col}: W={stat:.4f}, p={p:.4f}  → {verdict} (n={len(data)})")
+        verdict = "Not normal" if p < 0.05 else "normal"
+        n={len(data)}
+        if verdict == "Not normal":
+            print(f"\n--- {label} ---")
+            print(f"  {col}: W={stat:.4f}, p={p:.4f}  → {verdict} (n={len(data)})")
+        cols[col] = stat, p, verdict
+    return cols
 
 if __name__ == "__main__":
+    columns_to_test = ["AggregationTime", "TotalTrainingTime", "RoundDuration"]
     configs = load_global_stats(
         "/home/maurits/EnergyEfficient_Scattered-Directive/fabric/experiments/data/combined_global_stats.csv"
     )
@@ -39,7 +45,10 @@ if __name__ == "__main__":
 
         for timestamp, run_df in config_df.groupby("timestamp", sort=True):
             n_rows = len(run_df)
-            run_shapiro(run_df, label=f"run={timestamp} ({n_rows} rows)")
+            cols = run_shapiro(run_df, columns_to_test, label=f"run={timestamp} ({n_rows} rows)")
+            # print(cols)
+            # print(f"  {col}: W={stat:.4f}, p={p:.4f}  → {verdict} (n={n})")
+
         # n_runs = config_df["timestamp"].nunique()
         # n_rows = len(config_df)
         # label = f"exp={exp} K={K} Z={Z} σ_ed={sigma_ed} σ_iid={sigma_iid} ({n_runs} runs, {n_rows} rows)"

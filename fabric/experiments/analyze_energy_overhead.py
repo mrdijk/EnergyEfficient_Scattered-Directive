@@ -5,12 +5,12 @@ import pandas as pd
 import seaborn as sns
 
 sns.set_style("whitegrid")
-
+`
 df = pd.read_csv(
-    "/home/maurits/EnergyEfficient_Scattered-Directive/fabric/experiments/data/exp1/combined_energy_stats.csv",
+    "/home/maurits/EnergyEfficient_Scattered-Directive/fabric/experiments/data/combined_energy_stats.csv",
     index_col=[0],
 )
-df = df[df["K"] == 5]
+df = df[(df["K"] == 5) & (df['exp'] == 'exp1')]
 
 active_clients = ["client1", "client5", "client9", "client13", "client17"]
 entities = active_clients + ["server"]
@@ -42,35 +42,29 @@ COLOR_API_GW   = C_ORCH
 COLOR_ORCH_CTR = darken(C_ORCH, 0.72)
 COLOR_POLICY   = darken(C_ORCH, 0.50)
 
+def mean_kj_per_round(edf, container_filter):
+    """Sum joules for matching containers per round, then average across rounds."""
+    mask = container_filter(edf)
+    return (
+        edf[mask]
+        .groupby(["round", "timestamp"])["joules"]
+        .sum()
+        .mean()
+        / 1000.0
+    )
+
 # --- Collect entity data ---
 results = []
 for entity in entities:
     edf = df[df["namespace"] == entity]
 
-    hfl_train_kj = (
-        edf[edf["container_name"] == "hfl-train"]["joules"].sum() / 1000.0
-    )
-    hfl_train_model_kj = (
-        edf[edf["container_name"] == "hfl-train-model"]["joules"].sum() / 1000.0
-    )
-    agent_kj = (
-        edf[edf["container_name"] == entity]["joules"].sum() / 1000.0
-    )
-    sidecar_kj = (
-        edf[edf["container_name"] == "sidecar"]["joules"].sum() / 1000.0
-    )
-    linkerd_kj = (
-        edf[edf["container_name"].isin(["linkerd-proxy", "linkerd-init"])]["joules"].sum()
-        / 1000.0
-    )
-
     results.append({
-        "entity":              entity,
-        "hfl_train_kj":        hfl_train_kj,
-        "hfl_train_model_kj":  hfl_train_model_kj,
-        "agent_kj":            agent_kj,
-        "sidecar_kj":          sidecar_kj,
-        "linkerd_kj":          linkerd_kj,
+        "entity":             entity,
+        "hfl_train_kj":       mean_kj_per_round(edf, lambda d: d["container_name"] == "hfl-train"),
+        "hfl_train_model_kj": mean_kj_per_round(edf, lambda d: d["container_name"] == "hfl-train-model"),
+        "agent_kj":           mean_kj_per_round(edf, lambda d: d["container_name"] == entity),
+        "sidecar_kj":         mean_kj_per_round(edf, lambda d: d["container_name"] == "sidecar"),
+        "linkerd_kj":         mean_kj_per_round(edf, lambda d: d["container_name"].isin(["linkerd-proxy", "linkerd-init"])),
     })
 
 edf_plot = pd.DataFrame(results)
@@ -80,14 +74,11 @@ orch_containers = ["orchestrator", "policy-enforcer", "api-gateway"]
 orch_pods = df[df["container_name"].isin(orch_containers)]["pod_name"].unique()
 odf = df[df["pod_name"].isin(orch_pods)]
 
-api_gw_kj  = odf[odf["container_name"] == "api-gateway"]["joules"].sum()       / 1000.0
-orch_ctr_kj = odf[odf["container_name"] == "orchestrator"]["joules"].sum()     / 1000.0
-policy_kj  = odf[odf["container_name"] == "policy-enforcer"]["joules"].sum()   / 1000.0
-orch_sidecar_kj = odf[odf["container_name"] == "sidecar"]["joules"].sum()      / 1000.0
-orch_linkerd_kj = (
-    odf[odf["container_name"].isin(["linkerd-proxy", "linkerd-init"])]["joules"].sum()
-    / 1000.0
-)
+api_gw_kj       = mean_kj_per_round(odf, lambda d: d["container_name"] == "api-gateway")
+orch_ctr_kj     = mean_kj_per_round(odf, lambda d: d["container_name"] == "orchestrator")
+policy_kj       = mean_kj_per_round(odf, lambda d: d["container_name"] == "policy-enforcer")
+orch_sidecar_kj = mean_kj_per_round(odf, lambda d: d["container_name"] == "sidecar")
+orch_linkerd_kj = mean_kj_per_round(odf, lambda d: d["container_name"].isin(["linkerd-proxy", "linkerd-init"]))
 
 # --- Layout ---
 n_entities  = len(edf_plot)   # 6
@@ -196,17 +187,17 @@ label_totals(ax, [right_bar[orch_idx]], totals_orch_infra)
 # --- X-axis group labels ---
 group_labels = edf_plot["entity"].tolist() + ["Orchestration"]
 ax.set_xticks(group_centers)
-ax.set_xticklabels(group_labels, rotation=15, ha="right")
+ax.set_xticklabels(group_labels, rotation=0, ha="right")
 
-# Sub-labels below each bar pair
-for i, (lp, rp) in enumerate(zip(left_bar, right_bar)):
-    is_orch = (i == n_entities)
-    ax.text(lp, -0.055, "orch" if is_orch else "train",
-            ha="center", va="top", fontsize=7, color="gray",
-            transform=ax.get_xaxis_transform())
-    ax.text(rp, -0.055, "infra",
-            ha="center", va="top", fontsize=7, color="gray",
-            transform=ax.get_xaxis_transform())
+# # Sub-labels below each bar pair
+# for i, (lp, rp) in enumerate(zip(left_bar, right_bar)):
+#     is_orch = (i == n_entities)
+#     ax.text(lp, -0.055, "orch" if is_orch else "train",
+#             ha="center", va="top", fontsize=7, color="gray",
+#             transform=ax.get_xaxis_transform())
+#     ax.text(rp, -0.055, "infra",
+#             ha="center", va="top", fontsize=7, color="gray",
+#             transform=ax.get_xaxis_transform())
 
 # --- Vertical separator before Orchestration ---
 sep_x = (group_centers[n_entities - 1] + group_centers[n_entities]) / 2
@@ -220,14 +211,14 @@ for h, l in zip(handles, labels_leg):
         seen[l] = h
 ax.legend(seen.values(), seen.keys(), loc="upper right", framealpha=0.9, fontsize=9)
 
-ax.set_ylabel("Energy (kJ)")
-ax.set_title("Energy Breakdown per Entity — Training vs Infrastructure (K=5)")
+ax.set_ylabel("Energy (kJ / round)")
+# ax.set_title("Energy Breakdown per Entity — Training vs Infrastructure (K=5)")
 ax.grid(True, alpha=0.3, axis="y")
 ax.set_xlim(left_bar[0] - bar_width, right_bar[-1] + bar_width)
 
 plt.tight_layout()
 plt.savefig(
-    "/home/maurits/EnergyEfficient_Scattered-Directive/fabric/experiments/data/exp1/combined_energy_breakdown.png",
+    "/home/maurits/EnergyEfficient_Scattered-Directive/fabric/experiments/figures/component_energy_breakdown.png",
     dpi=150,
 )
 

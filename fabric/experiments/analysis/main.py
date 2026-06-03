@@ -1,5 +1,7 @@
 from AD import main as AD_main
+from PLOT import main as PLOT_main
 from RCD import main as RCD_main
+from REPORT import main as REPORT_main
 
 
 def main():
@@ -13,6 +15,10 @@ def main():
     # Perform Root Cause Analysis (RCA)
     RCD_main()
 
+    # Create plots
+    PLOT_main()
+
+    REPORT_main()
     print("Finished data analysis")
 
 if __name__ == '__main__':

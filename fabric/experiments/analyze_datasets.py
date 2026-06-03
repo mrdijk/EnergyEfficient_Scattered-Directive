@@ -1,6 +1,6 @@
-import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import seaborn as sns
 
 # Set style
@@ -8,9 +8,18 @@ sns.set_style("whitegrid")
 plt.rcParams['figure.figsize'] = (15, 10)
 
 # Read the data files
-energy_df = pd.read_csv('/home/maurits/EnergyEfficient_Scattered-Directive/fabric/data/3/30/12-01-26-153806/energy_consumption.csv')
-client_metrics_df = pd.read_csv('/home/maurits/EnergyEfficient_Scattered-Directive/fabric/data/3/30/12-01-26-153806/client_stats.csv')
-global_metrics_df = pd.read_csv('/home/maurits/EnergyEfficient_Scattered-Directive/fabric/data/3/30/12-01-26-153806/global_stats.csv')
+energy_df = pd.read_csv(
+    '/home/maurits/EnergyEfficient_Scattered-Directive/fabric/experiments/data/combined_energy_stats.csv',
+    index_col=0)
+client_metrics_df = pd.read_csv(
+    '/home/maurits/EnergyEfficient_Scattered-Directive/fabric/experiments/data/combined_client_stats.csv')
+global_metrics_df = pd.read_csv(
+    '/home/maurits/EnergyEfficient_Scattered-Directive/fabric/experiments/data/combined_global_stats.csv',
+    index_col=0)
+
+energy_df = energy_df[energy_df['exp'] == 'exp1']
+client_metrics_df = client_metrics_df[client_metrics_df['exp'] == 'exp1']
+global_metrics_df = global_metrics_df[global_metrics_df['exp'] == 'exp1']
 
 # ============= ENERGY ANALYSIS =============
 print("=" * 80)
@@ -52,7 +61,7 @@ for client_id in client_metrics_df['ClientID'].unique():
     avg_acc = client_data['ClientAccuracy'].mean()
     final_acc = client_data['ClientAccuracy'].iloc[-1]
     avg_time = client_data['ClientTrainingTime'].mean()
-    
+
     print(f"\n{client_id}:")
     print(f"  Average Accuracy: {avg_acc:.4f}")
     print(f"  Final Accuracy:   {final_acc:.4f}")
@@ -78,14 +87,14 @@ print("=" * 80)
 for client_id in client_metrics_df['ClientID'].unique():
     client_data = client_metrics_df[client_metrics_df['ClientID'] == client_id]
     total_training_time = client_data['ClientTrainingTime'].sum()
-    
+
     # Get energy for this client's main container
     namespace = client_id
     if namespace in energy_by_namespace.index:
         client_total_energy = energy_by_namespace[namespace]
         energy_per_second = client_total_energy / total_training_time if total_training_time > 0 else 0
         final_acc = client_data['ClientAccuracy'].iloc[-1]
-        
+
         print(f"\n{client_id}:")
         print(f"  Total Energy: {client_total_energy:.2f} J")
         print(f"  Total Training Time: {total_training_time:.2f} seconds")

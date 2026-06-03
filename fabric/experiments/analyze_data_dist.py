@@ -9,7 +9,7 @@ sns.set_palette("deep")
 # plt.rcParams["figure.figsize"] = (18, 16)
 
 TOTAL_DATASET_SIZE = 531130
-MODEL_SIZE_MB = 6.1
+MODEL_SIZE_MB = 8.3
 
 ED = [1000, 1.7]
 IID = [10, 6, 3]
@@ -69,7 +69,7 @@ def plot_global_accuracy(df_global):
     ax.grid(True, alpha=0.3, axis="y")
 
     plt.tight_layout()
-    plt.savefig("analysis_output/exp3/ED_IID_global.png", dpi=300, bbox_inches="tight")
+    plt.savefig("ED_IID_global.png", dpi=300, bbox_inches="tight")
     print("Saved: ED_IID_global.png")
 
 
@@ -128,20 +128,21 @@ def plot_client_accuracy(df_client):
     # )
 
     plt.tight_layout()
-    plt.savefig("analysis_output/exp3/ED_IID_clients.png", dpi=300, bbox_inches="tight")
+    plt.savefig("ED_IID_clients.png", dpi=300, bbox_inches="tight")
     print("Saved: ED_IID_clients.png")
 
 
 def main():
     """Main analysis function."""
-    base_path = "analysis_output/exp3"
+    base_path = "data"
     print("Loading data...")
     df_global = pd.read_csv(f"{base_path}/combined_global_stats.csv", index_col=0)
     df_client = pd.read_csv(f"{base_path}/combined_client_stats.csv", index_col=0)
 
+    df_global = df_global[df_global["exp"] == "exp3"]
+    df_client = df_client[df_client["exp"] == "exp3"]
+
     print("Effect of client data size (e.d.) and content (i.i.d.) variations.")
-    # ed = 1000, 1.7
-    # iid = 3,6,10
 
     global_acc = df_global.groupby(["sigma_ed", "sigma_iid"])["GlobalAccuracy"].mean()
     print(global_acc)
